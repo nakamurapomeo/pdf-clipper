@@ -36,8 +36,10 @@ const MIN_RECT_SIZE = 0.01;
 
 // OpenRouter モデル定義
 const AI_MODELS = [
-    { id: 'google/gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash' },
-    { id: 'google/gemini-2.5-pro-preview', name: 'Gemini 2.5 Pro' },
+    { id: 'google/gemini-3-flash-preview', name: 'Gemini 3.0 Flash' },
+    { id: 'google/gemini-3-pro-preview', name: 'Gemini 3.0 Pro' },
+    { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
     { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash' },
 ];
 
@@ -390,7 +392,11 @@ const PDFClipperApp = () => {
                     }]
                 })
             });
-            if (!response.ok) throw new Error('API Request Failed');
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                console.error("OpenRouter API Error:", errData);
+                throw new Error(errData.error?.message || `API Error: ${response.status}`);
+            }
             const data = await response.json();
             let extractedText = data.choices?.[0]?.message?.content?.trim() || "";
 
@@ -418,7 +424,9 @@ const PDFClipperApp = () => {
             setClips(prev => prev.map(c => c.id === clipId ? { ...c, title: extractedText, isAnalyzing: false } : c));
         } catch (e) {
             console.error(e);
-            setClips(prev => prev.map(c => c.id === clipId ? { ...c, isAnalyzing: false, title: "エラー: 抽出できませんでした" } : c));
+            const errorMessage = e.message || "抽出失敗";
+            setClips(prev => prev.map(c => c.id === clipId ? { ...c, isAnalyzing: false, title: `エラー: ${errorMessage.substring(0, 20)}...` } : c));
+            alert(`AI解析エラー: ${e.message}`);
         }
     };
 
