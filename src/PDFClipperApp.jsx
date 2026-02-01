@@ -861,137 +861,139 @@ const PDFClipperApp = () => {
                             )}
                         </div>
                     </div>
+                </div>
 
-                    {/* Right Sidebar */}
-                    <div className={`${rightSidebarOpen ? 'w-80 border-l' : 'w-0 border-none'} bg-white flex flex-col z-20 shadow-lg flex-shrink-0 transition-all duration-300`}>
-                        <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500 flex justify-between items-center whitespace-nowrap overflow-hidden">
-                            <span>結合リスト</span>
-                            <div className="flex gap-2 items-center">
-                                <span className="text-[10px] text-gray-400">AICost: ${totalCost.toFixed(4)}</span>
-                                <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="flex items-center gap-1 bg-purple-100 text-purple-600 px-2 py-1 rounded text-xs hover:bg-purple-200 transition disabled:opacity-50" title="すべてのクリップをAI解析">
-                                    <Sparkles className="w-3 h-3" />一括
-                                </button>
-                                <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">{clips.length}</span>
-                            </div>
+                {/* Right Sidebar */}
+                <div className={`${rightSidebarOpen ? 'w-80 border-l' : 'w-0 border-none'} bg-white flex flex-col z-20 shadow-lg flex-shrink-0 transition-all duration-300`}>
+                    <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500 flex justify-between items-center whitespace-nowrap overflow-hidden">
+                        <span>結合リスト</span>
+                        <div className="flex gap-2 items-center">
+                            <span className="text-[10px] text-gray-400">AICost: ${totalCost.toFixed(4)}</span>
+                            <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="flex items-center gap-1 bg-purple-100 text-purple-600 px-2 py-1 rounded text-xs hover:bg-purple-200 transition disabled:opacity-50" title="すべてのクリップをAI解析">
+                                <Sparkles className="w-3 h-3" />一括
+                            </button>
+                            <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">{clips.length}</span>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-3 space-y-6">
-                            {clips.map((clip, idx) => (
-                                <div key={clip.id} className={`group relative border rounded shadow-sm p-2 transition ${editingClipId === clip.id ? 'bg-orange-50 border-orange-300 ring-2 ring-orange-200' : 'bg-gray-50 hover:shadow-md'}`}>
-                                    <div className="text-xs text-gray-400 mb-2 flex justify-between items-center">
-                                        <span>#{idx + 1} {clip.aspectRatio > 1 ? '(横)' : '(縦)'}</span>
-                                        <div className="flex gap-1">
-                                            <button onClick={() => editClip(clip)} className="text-blue-400 hover:text-blue-600 p-1 hover:bg-blue-50 rounded" title="再編集"><Edit3 className="w-3.5 h-3.5" /></button>
-                                            <button onClick={() => removeClip(clip.id)} className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 rounded" title="削除"><Trash2 className="w-3.5 h-3.5" /></button>
-                                        </div>
-                                    </div>
-                                    <div className="relative bg-white border overflow-hidden rounded flex items-center justify-center h-32 cursor-pointer hover:opacity-90 mb-2" onClick={() => editClip(clip)}>
-                                        <img src={clip.dataUrl} className="max-w-full max-h-full object-contain" alt="clip" />
-                                        {editingClipId === clip.id && <div className="absolute inset-0 bg-orange-500/10 flex items-center justify-center pointer-events-none"><span className="bg-white/90 text-orange-600 text-xs px-2 py-1 rounded font-bold shadow-sm">編集中</span></div>}
-                                    </div>
-                                    <div className="mb-2">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <input type="text" className="flex-1 text-xs border rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none" placeholder="記事タイトル" value={clip.title || ''} onChange={(e) => updateClipTitle(clip.id, e.target.value)} />
-                                            <button onClick={() => analyzeTitleWithAI(clip.id)} disabled={clip.isAnalyzing} className="p-1.5 bg-purple-100 text-purple-600 rounded hover:bg-purple-200 disabled:opacity-50" title="AIでタイトル抽出">
-                                                {clip.isAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                                        <span className="whitespace-nowrap">サイズ: {clip.scalePercent || 100}%</span>
-                                        <input type="range" min="10" max="100" step="5" value={clip.scalePercent || 100} onChange={(e) => updateClipScale(clip.id, e.target.value)} className="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-3 space-y-6">
+                        {clips.map((clip, idx) => (
+                            <div key={clip.id} className={`group relative border rounded shadow-sm p-2 transition ${editingClipId === clip.id ? 'bg-orange-50 border-orange-300 ring-2 ring-orange-200' : 'bg-gray-50 hover:shadow-md'}`}>
+                                <div className="text-xs text-gray-400 mb-2 flex justify-between items-center">
+                                    <span>#{idx + 1} {clip.aspectRatio > 1 ? '(横)' : '(縦)'}</span>
+                                    <div className="flex gap-1">
+                                        <button onClick={() => editClip(clip)} className="text-blue-400 hover:text-blue-600 p-1 hover:bg-blue-50 rounded" title="再編集"><Edit3 className="w-3.5 h-3.5" /></button>
+                                        <button onClick={() => removeClip(clip.id)} className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 rounded" title="削除"><Trash2 className="w-3.5 h-3.5" /></button>
                                     </div>
                                 </div>
-                            ))}
-                            {clips.length === 0 && <div className="text-center p-6 text-gray-400 text-xs">「リストに追加」を押すと<br />ここに画像が追加されます</div>}
-                        </div>
-                        <div className="p-4 border-t bg-gray-50 space-y-3">
-                            <div className="space-y-2">
-                                <div className="flex items-center gap-2">
-                                    <input type="date" value={fileDate.toISOString().split('T')[0]} onChange={(e) => e.target.valueAsDate && setFileDate(e.target.valueAsDate)} className="flex-1 px-2 py-1 text-xs border rounded shadow-sm outline-none" />
+                                <div className="relative bg-white border overflow-hidden rounded flex items-center justify-center h-32 cursor-pointer hover:opacity-90 mb-2" onClick={() => editClip(clip)}>
+                                    <img src={clip.dataUrl} className="max-w-full max-h-full object-contain" alt="clip" />
+                                    {editingClipId === clip.id && <div className="absolute inset-0 bg-orange-500/10 flex items-center justify-center pointer-events-none"><span className="bg-white/90 text-orange-600 text-xs px-2 py-1 rounded font-bold shadow-sm">編集中</span></div>}
                                 </div>
-                                <input type="text" value={fileNamePrefix} onChange={(e) => setFileNamePrefix(e.target.value)} className="w-full px-2 py-1 text-xs border rounded shadow-sm outline-none" placeholder="【共有事項】" />
+                                <div className="mb-2">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <input type="text" className="flex-1 text-xs border rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none" placeholder="記事タイトル" value={clip.title || ''} onChange={(e) => updateClipTitle(clip.id, e.target.value)} />
+                                        <button onClick={() => analyzeTitleWithAI(clip.id)} disabled={clip.isAnalyzing} className="p-1.5 bg-purple-100 text-purple-600 rounded hover:bg-purple-200 disabled:opacity-50" title="AIでタイトル抽出">
+                                            {clip.isAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs text-gray-500">
+                                    <span className="whitespace-nowrap">サイズ: {clip.scalePercent || 100}%</span>
+                                    <input type="range" min="10" max="100" step="5" value={clip.scalePercent || 100} onChange={(e) => updateClipScale(clip.id, e.target.value)} className="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+                                </div>
                             </div>
-                            <div className="flex flex-col gap-2">
-                                <button onClick={copyAndOpenCybozu} className="w-full flex items-center justify-center gap-2 py-2.5 rounded text-sm font-bold shadow-sm bg-cyan-600 hover:bg-cyan-700 text-white transition">
-                                    <ExternalLink className="w-4 h-4" />Cybozuへ投稿
-                                </button>
-                                <button onClick={downloadPDF} disabled={clips.length === 0} className={`w-full py-2.5 rounded text-sm font-bold shadow-sm transition ${clips.length > 0 ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
-                                    PDFをダウンロード
-                                </button>
+                        ))}
+                        {clips.length === 0 && <div className="text-center p-6 text-gray-400 text-xs">「リストに追加」を押すと<br />ここに画像が追加されます</div>}
+                    </div>
+                    <div className="p-4 border-t bg-gray-50 space-y-3">
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                                <input type="date" value={fileDate.toISOString().split('T')[0]} onChange={(e) => e.target.valueAsDate && setFileDate(e.target.valueAsDate)} className="flex-1 px-2 py-1 text-xs border rounded shadow-sm outline-none" />
                             </div>
+                            <input type="text" value={fileNamePrefix} onChange={(e) => setFileNamePrefix(e.target.value)} className="w-full px-2 py-1 text-xs border rounded shadow-sm outline-none" placeholder="【共有事項】" />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                            <button onClick={copyAndOpenCybozu} className="w-full flex items-center justify-center gap-2 py-2.5 rounded text-sm font-bold shadow-sm bg-cyan-600 hover:bg-cyan-700 text-white transition">
+                                <ExternalLink className="w-4 h-4" />Cybozuへ投稿
+                            </button>
+                            <button onClick={downloadPDF} disabled={clips.length === 0} className={`w-full py-2.5 rounded text-sm font-bold shadow-sm transition ${clips.length > 0 ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
+                                PDFをダウンロード
+                            </button>
                         </div>
                     </div>
                 </div>
-
-                {/* Settings Modal */}
-                {settingsOpen && (
-                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
-                            <div className="flex items-center justify-between p-4 border-b">
-                                <h3 className="font-bold text-gray-700 flex items-center gap-2"><Settings className="w-5 h-5" />設定</h3>
-                                <button onClick={() => setSettingsOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-                            </div>
-                            <div className="p-4 space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">OpenRouter APIキー</label>
-                                    <div className="flex items-center gap-2">
-                                        <Key className="w-4 h-4 text-gray-400" />
-                                        <input type="password" value={openRouterApiKey} onChange={(e) => setOpenRouterApiKey(e.target.value)} className="flex-1 px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="sk-or-..." />
-                                    </div>
-                                    <p className="text-xs text-gray-500 mt-1">APIキーはブラウザに保存されます。</p>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">AIモデル</label>
-                                    <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                                        {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                                    </select>
-                                </div>
-                            </div>
-                            <div className="p-4 border-t flex justify-end gap-2">
-                                <button onClick={() => setSettingsOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">キャンセル</button>
-                                <button onClick={saveSettings} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-bold">保存</button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Preview Modal */}
-                {previewUrl && (
-                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-8">
-                        <div className="bg-white rounded-lg w-full h-full max-w-4xl max-h-full flex flex-col shadow-2xl animate-fade-in">
-                            <div className="flex justify-between items-center p-3 border-b">
-                                <h3 className="font-bold text-gray-700 flex items-center gap-2"><Eye className="w-5 h-5 text-blue-600" />プレビュー</h3>
-                                <button onClick={() => setPreviewUrl(null)} className="p-1 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-500" /></button>
-                            </div>
-                            <div className="flex-1 bg-gray-100 p-2 overflow-hidden">
-                                <iframe src={previewUrl} className="w-full h-full rounded border border-gray-300 bg-white" title="PDF Preview" />
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* AI Result Modal */}
-                {aiModalOpen && (
-                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col max-h-[80vh]">
-                            <div className="flex items-center justify-between p-4 border-b">
-                                <div className="flex items-center gap-2 text-purple-600"><Sparkles className="w-5 h-5" /><h3 className="font-bold">AI解析結果</h3></div>
-                                <button onClick={() => setAiModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-                            </div>
-                            <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
-                                {isAiLoading ? <div className="flex flex-col items-center justify-center py-12 text-gray-500"><Loader2 className="w-8 h-8 animate-spin mb-2 text-purple-500" /><p>AIが画像を解析中...</p></div> : <div className="prose prose-sm max-w-none whitespace-pre-wrap text-sm text-gray-700">{aiResult}</div>}
-                            </div>
-                            <div className="p-4 border-t flex justify-end gap-2">
-                                <button onClick={copyToClipboard} disabled={isAiLoading || !aiResult} className="flex items-center gap-2 px-3 py-2 bg-white border hover:bg-gray-50 text-gray-700 rounded text-sm transition">
-                                    {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}{copied ? 'コピーしました' : '結果をコピー'}
-                                </button>
-                                <button onClick={() => setAiModalOpen(false)} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm font-bold transition">閉じる</button>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
-            );
+
+            {/* Settings Modal */}
+            {settingsOpen && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+                        <div className="flex items-center justify-between p-4 border-b">
+                            <h3 className="font-bold text-gray-700 flex items-center gap-2"><Settings className="w-5 h-5" />設定</h3>
+                            <button onClick={() => setSettingsOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                        </div>
+                        <div className="p-4 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">OpenRouter APIキー</label>
+                                <div className="flex items-center gap-2">
+                                    <Key className="w-4 h-4 text-gray-400" />
+                                    <input type="password" value={openRouterApiKey} onChange={(e) => setOpenRouterApiKey(e.target.value)} className="flex-1 px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="sk-or-..." />
+                                </div>
+                                <p className="text-xs text-gray-500 mt-1">APIキーはブラウザに保存されます。</p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">AIモデル</label>
+                                <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                                    {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                        <div className="p-4 border-t flex justify-end gap-2">
+                            <button onClick={() => setSettingsOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">キャンセル</button>
+                            <button onClick={saveSettings} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-bold">保存</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Preview Modal */}
+            {previewUrl && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-8">
+                    <div className="bg-white rounded-lg w-full h-full max-w-4xl max-h-full flex flex-col shadow-2xl animate-fade-in">
+                        <div className="flex justify-between items-center p-3 border-b">
+                            <h3 className="font-bold text-gray-700 flex items-center gap-2"><Eye className="w-5 h-5 text-blue-600" />プレビュー</h3>
+                            <button onClick={() => setPreviewUrl(null)} className="p-1 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-500" /></button>
+                        </div>
+                        <div className="flex-1 bg-gray-100 p-2 overflow-hidden">
+                            <iframe src={previewUrl} className="w-full h-full rounded border border-gray-300 bg-white" title="PDF Preview" />
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* AI Result Modal */}
+            {aiModalOpen && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col max-h-[80vh]">
+                        <div className="flex items-center justify-between p-4 border-b">
+                            <div className="flex items-center gap-2 text-purple-600"><Sparkles className="w-5 h-5" /><h3 className="font-bold">AI解析結果</h3></div>
+                            <button onClick={() => setAiModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                        </div>
+                        <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
+                            {isAiLoading ? <div className="flex flex-col items-center justify-center py-12 text-gray-500"><Loader2 className="w-8 h-8 animate-spin mb-2 text-purple-500" /><p>AIが画像を解析中...</p></div> : <div className="prose prose-sm max-w-none whitespace-pre-wrap text-sm text-gray-700">{aiResult}</div>}
+                        </div>
+                        <div className="p-4 border-t flex justify-end gap-2">
+                            <button onClick={copyToClipboard} disabled={isAiLoading || !aiResult} className="flex items-center gap-2 px-3 py-2 bg-white border hover:bg-gray-50 text-gray-700 rounded text-sm transition">
+                                {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}{copied ? 'コピーしました' : '結果をコピー'}
+                            </button>
+                            <button onClick={() => setAiModalOpen(false)} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm font-bold transition">閉じる</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    </div >
+    );
 };
 
-            export default PDFClipperApp;
+export default PDFClipperApp;
