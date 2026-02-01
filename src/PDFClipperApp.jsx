@@ -367,318 +367,319 @@ const PDFClipperApp = () => {
     const saveClip = async () => {
         if (selectedFileIndex === null) return;
         if (cropRect.w === 0 || cropRect.h === 0) {
-            alert("蛻・ｊ謚懊″譫・育ｷ代・譫・峨ｒ菴懈・縺励※縺上□縺輔＞縲・); return; }
+            alert("切り抜き枠（緑の枠）を作成してください。"); return;
+        }
         const dataUrl = await generateClipImage(selectedFileIndex, currentPage, rotation, cropRect, masks);
-            let currentClipData = { title: '', scalePercent: 100 };
-            if (editingClipId) {
-                const existingClip = clips.find(c => c.id === editingClipId);
-                if (existingClip) { currentClipData.title = existingClip.title; currentClipData.scalePercent = existingClip.scalePercent; }
-            }
-            const w = cropRect.w || 1, h = cropRect.h || 1;
-            const clipData = {
-                id: editingClipId || Date.now(), dataUrl, width: w, height: h, aspectRatio: w / h,
-                scalePercent: currentClipData.scalePercent, title: currentClipData.title, isAnalyzing: false,
-                source: { fileIndex: selectedFileIndex, pageNumber: currentPage, cropRect: { ...cropRect }, masks: [...masks], rotation }
-            };
-            if (editingClipId) { setClips(prev => prev.map(c => c.id === editingClipId ? clipData : c)); setEditingClipId(null); }
-            else { setClips(prev => [...prev, clipData]); }
-            setCropRect({ x: 0, y: 0, w: 0, h: 0 });
-            setMasks([]);
-            setMode('view');
-            setZoomLevel(1.0);
+        let currentClipData = { title: '', scalePercent: 100 };
+        if (editingClipId) {
+            const existingClip = clips.find(c => c.id === editingClipId);
+            if (existingClip) { currentClipData.title = existingClip.title; currentClipData.scalePercent = existingClip.scalePercent; }
+        }
+        const w = cropRect.w || 1, h = cropRect.h || 1;
+        const clipData = {
+            id: editingClipId || Date.now(), dataUrl, width: w, height: h, aspectRatio: w / h,
+            scalePercent: currentClipData.scalePercent, title: currentClipData.title, isAnalyzing: false,
+            source: { fileIndex: selectedFileIndex, pageNumber: currentPage, cropRect: { ...cropRect }, masks: [...masks], rotation }
         };
+        if (editingClipId) { setClips(prev => prev.map(c => c.id === editingClipId ? clipData : c)); setEditingClipId(null); }
+        else { setClips(prev => [...prev, clipData]); }
+        setCropRect({ x: 0, y: 0, w: 0, h: 0 });
+        setMasks([]);
+        setMode('view');
+        setZoomLevel(1.0);
+    };
 
-        const updateClipScale = (id, newScale) => { setClips(prev => prev.map(c => c.id === id ? { ...c, scalePercent: parseInt(newScale) } : c)); };
-        const updateClipTitle = (id, newTitle) => { setClips(prev => prev.map(c => c.id === id ? { ...c, title: newTitle } : c)); };
-        const editClip = (clip) => {
-            setSelectedFileIndex(clip.source.fileIndex);
-            setCurrentPage(clip.source.pageNumber);
-            setRotation(clip.source.rotation);
-            setCropRect(clip.source.cropRect);
-            setMasks(clip.source.masks);
-            setEditingClipId(clip.id);
-            setMode('view');
-        };
+    const updateClipScale = (id, newScale) => { setClips(prev => prev.map(c => c.id === id ? { ...c, scalePercent: parseInt(newScale) } : c)); };
+    const updateClipTitle = (id, newTitle) => { setClips(prev => prev.map(c => c.id === id ? { ...c, title: newTitle } : c)); };
+    const editClip = (clip) => {
+        setSelectedFileIndex(clip.source.fileIndex);
+        setCurrentPage(clip.source.pageNumber);
+        setRotation(clip.source.rotation);
+        setCropRect(clip.source.cropRect);
+        setMasks(clip.source.masks);
+        setEditingClipId(clip.id);
+        setMode('view');
+    };
 
-        // OpenRouter API 縺ｧ繧ｿ繧､繝医Ν謚ｽ蜃ｺ・医ヵ繧ｩ繝ｼ繝ｫ繝舌ャ繧ｯ莉倥″・・
-        const analyzeTitleWithAI = async (clipId) => {
-            const clip = clips.find(c => c.id === clipId);
-            if (!clip || !openRouterApiKey) {
-                if (!openRouterApiKey) alert("險ｭ螳壹°繧碓penRouter API繧ｭ繝ｼ繧貞・蜉帙＠縺ｦ縺上□縺輔＞縲・);
+    // OpenRouter APIでタイトル抽出・フォールバック処理
+    const analyzeTitleWithAI = async (clipId) => {
+        const clip = clips.find(c => c.id === clipId);
+        if (!clip || !openRouterApiKey) {
+            if (!openRouterApiKey) alert("設定からOpenRouter APIキーを入力してください。");
             return;
+        }
+        setClips(prev => prev.map(c => c.id === clipId ? { ...c, isAnalyzing: true } : c));
+        try {
+            const base64Data = clip.dataUrl.split(',')[1];
+            // まず文字認識でタイトルを抽出
+            const textPrompt = "この新聞記事の切り抜き画像から、メインの「見出し（タイトル）」だけを抜き出して文字にしてください。前置きや説明は不要です。タイトル文字列のみを返してください。文字が読み取れない場合は「NO_TEXT」とだけ返してください。";
+            const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openRouterApiKey}` },
+                body: JSON.stringify({
+                    model: selectedModel,
+                    messages: [{
+                        role: 'user', content: [
+                            { type: 'text', text: textPrompt },
+                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Data}` } }
+                        ]
+                    }]
+                })
+            });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                console.error("OpenRouter API Error:", errData);
+                throw new Error(errData.error?.message || `API Error: ${response.status}`);
             }
-            setClips(prev => prev.map(c => c.id === clipId ? { ...c, isAnalyzing: true } : c));
-            try {
-                const base64Data = clip.dataUrl.split(',')[1];
-                // 縺ｾ縺壽枚蟄玲歓蜃ｺ繧定ｩｦ縺ｿ繧・
-                const textPrompt = "縺薙・譁ｰ閨櫁ｨ倅ｺ九・蛻・ｊ謚懊″逕ｻ蜒上°繧峨√Γ繧､繝ｳ縺ｮ縲瑚ｦ句・縺暦ｼ医ち繧､繝医Ν・峨阪□縺代ｒ謚懊″蜃ｺ縺励※譁・ｭ励↓縺励※縺上□縺輔＞縲ょ燕鄂ｮ縺阪ｄ隱ｬ譏弱・荳崎ｦ√〒縺吶ゅち繧､繝医Ν譁・ｭ怜・縺ｮ縺ｿ繧定ｿ斐＠縺ｦ縺上□縺輔＞縲よ枚蟄励′隱ｭ縺ｿ蜿悶ｌ縺ｪ縺・ｴ蜷医・縲君O_TEXT縲阪→縺縺題ｿ斐＠縺ｦ縺上□縺輔＞縲・;
-                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            const data = await response.json();
+
+            // コスト計算
+            if (data.usage) {
+                const modelInfo = AI_MODELS.find(m => m.id === selectedModel);
+                if (modelInfo) {
+                    const inputTokens = data.usage.prompt_tokens || 0;
+                    const outputTokens = data.usage.completion_tokens || 0;
+                    const cost = (inputTokens * modelInfo.inputCost + outputTokens * modelInfo.outputCost) / 1000000;
+                    setTotalCost(prev => prev + cost);
+                }
+            }
+
+            let extractedText = data.choices?.[0]?.message?.content?.trim() || "";
+
+            // フォールバック: 文字が読み取れなかった場合の記事タイトル生成
+            if (!extractedText || extractedText === "NO_TEXT" || extractedText.length < 2) {
+                const imagePrompt = "この新聞記事の画像を見て、内容を推測し、適切な記事タイトルを1行で生成してください。タイトルのみを返してください。";
+                const fallbackResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openRouterApiKey}` },
                     body: JSON.stringify({
                         model: selectedModel,
                         messages: [{
                             role: 'user', content: [
-                                { type: 'text', text: textPrompt },
+                                { type: 'text', text: imagePrompt },
                                 { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Data}` } }
                             ]
                         }]
                     })
                 });
-                if (!response.ok) {
-                    const errData = await response.json().catch(() => ({}));
-                    console.error("OpenRouter API Error:", errData);
-                    throw new Error(errData.error?.message || `API Error: ${response.status}`);
-                }
-                const data = await response.json();
-
-                // 繧ｳ繧ｹ繝郁ｨ育ｮ・
-                if (data.usage) {
-                    const modelInfo = AI_MODELS.find(m => m.id === selectedModel);
-                    if (modelInfo) {
-                        const inputTokens = data.usage.prompt_tokens || 0;
-                        const outputTokens = data.usage.completion_tokens || 0;
-                        const cost = (inputTokens * modelInfo.inputCost + outputTokens * modelInfo.outputCost) / 1000000;
-                        setTotalCost(prev => prev + cost);
-                    }
-                }
-
-                let extractedText = data.choices?.[0]?.message?.content?.trim() || "";
-
-                // 繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ: 譁・ｭ励′隱ｭ縺ｿ蜿悶ｌ縺ｪ縺九▲縺溷ｴ蜷医・逕ｻ蜒剰ｧ｣譫舌〒繧ｿ繧､繝医Ν繧堤函謌・
-                if (!extractedText || extractedText === "NO_TEXT" || extractedText.length < 2) {
-                    const imagePrompt = "縺薙・譁ｰ閨櫁ｨ倅ｺ九・逕ｻ蜒上ｒ隕九※縲∝・螳ｹ繧呈耳貂ｬ縺励・←蛻・↑險倅ｺ九ち繧､繝医Ν繧・陦後〒逕滓・縺励※縺上□縺輔＞縲ゅち繧､繝医Ν縺ｮ縺ｿ繧定ｿ斐＠縺ｦ縺上□縺輔＞縲・;
-                    const fallbackResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openRouterApiKey}` },
-                        body: JSON.stringify({
-                            model: selectedModel,
-                            messages: [{
-                                role: 'user', content: [
-                                    { type: 'text', text: imagePrompt },
-                                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Data}` } }
-                                ]
-                            }]
-                        })
-                    });
-                    if (fallbackResponse.ok) {
-                        const fallbackData = await fallbackResponse.json();
-                        // 繧ｳ繧ｹ繝郁ｨ育ｮ暦ｼ医ヵ繧ｩ繝ｼ繝ｫ繝舌ャ繧ｯ・・
-                        if (fallbackData.usage) {
-                            const modelInfo = AI_MODELS.find(m => m.id === selectedModel);
-                            if (modelInfo) {
-                                const inputTokens = fallbackData.usage.prompt_tokens || 0;
-                                const outputTokens = fallbackData.usage.completion_tokens || 0;
-                                const cost = (inputTokens * modelInfo.inputCost + outputTokens * modelInfo.outputCost) / 1000000;
-                                setTotalCost(prev => prev + cost);
-                            }
+                if (fallbackResponse.ok) {
+                    const fallbackData = await fallbackResponse.json();
+                    // 繧ｳ繧ｹ繝郁ｨ育ｮ暦ｼ医ヵ繧ｩ繝ｼ繝ｫ繝舌ャ繧ｯ・・
+                    if (fallbackData.usage) {
+                        const modelInfo = AI_MODELS.find(m => m.id === selectedModel);
+                        if (modelInfo) {
+                            const inputTokens = fallbackData.usage.prompt_tokens || 0;
+                            const outputTokens = fallbackData.usage.completion_tokens || 0;
+                            const cost = (inputTokens * modelInfo.inputCost + outputTokens * modelInfo.outputCost) / 1000000;
+                            setTotalCost(prev => prev + cost);
                         }
-                        extractedText = fallbackData.choices?.[0]?.message?.content?.trim() || "繧ｿ繧､繝医Ν蜿門ｾ怜､ｱ謨・;
                     }
+                    extractedText = fallbackData.choices?.[0]?.message?.content?.trim() || "タイトル取得失敗";
                 }
-                setClips(prev => prev.map(c => c.id === clipId ? { ...c, title: extractedText, isAnalyzing: false } : c));
-            } catch (e) {
-                console.error(e);
-                const errorMessage = e.message || "謚ｽ蜃ｺ螟ｱ謨・;
-                setClips(prev => prev.map(c => c.id === clipId ? { ...c, isAnalyzing: false, title: `繧ｨ繝ｩ繝ｼ: ${errorMessage.substring(0, 20)}...` } : c));
-                alert(`AI隗｣譫舌お繝ｩ繝ｼ: ${e.message}`);
             }
+            setClips(prev => prev.map(c => c.id === clipId ? { ...c, title: extractedText, isAnalyzing: false } : c));
+        } catch (e) {
+            console.error(e);
+            const errorMessage = e.message || "抽出失敗";
+            setClips(prev => prev.map(c => c.id === clipId ? { ...c, isAnalyzing: false, title: `エラー: ${errorMessage.substring(0, 20)}...` } : c));
+            alert(`AI解析エラー: ${e.message}`);
+        }
+    };
+
+    const analyzeAllTitles = async () => {
+        if (!openRouterApiKey) {
+            alert("險ｭ螳壹°繧碓penRouter API繧ｭ繝ｼ繧貞・蜉帙＠縺ｦ縺上□縺輔＞縲・); return; }
+        if (!confirm("リスト内のすべてのクリップに対してAI解析を実行しますか？")) return;
+            for (const clip of clips) { await analyzeTitleWithAI(clip.id); await new Promise(r => setTimeout(r, 500)); }
         };
 
-        const analyzeAllTitles = async () => {
-            if (!openRouterApiKey) {
-                alert("險ｭ螳壹°繧碓penRouter API繧ｭ繝ｼ繧貞・蜉帙＠縺ｦ縺上□縺輔＞縲・); return; }
-        if (!confirm("繝ｪ繧ｹ繝亥・縺ｮ縺吶∋縺ｦ縺ｮ繧ｯ繝ｪ繝・・縺ｫ蟇ｾ縺励※AI隗｣譫舌ｒ螳溯｡後＠縺ｾ縺吶°・・)) return;
-        for (const clip of clips) { await analyzeTitleWithAI(clip.id); await new Promise(r => setTimeout(r, 500)); }
-            };
+        const copyToClipboard = () => {
+            const success = copyToClipboardFallback(aiResult);
+            if (success) { setCopied(true); setTimeout(() => setCopied(false), 2000); }
+        };
 
-            const copyToClipboard = () => {
-                const success = copyToClipboardFallback(aiResult);
-                if (success) { setCopied(true); setTimeout(() => setCopied(false), 2000); }
-            };
+        const formatDateKey = (date) => {
+            const d = new Date(date);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        };
 
-            const formatDateKey = (date) => {
-                const d = new Date(date);
-                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            };
-
-            const updateMatrixCount = (date, key, delta) => {
-                const dKey = formatDateKey(date);
-                setMatrixCounts(prev => {
-                    const currentCounts = prev[dKey] || { nikkei: 0, agri: 0, mj: 0, commercial: 0 };
-                    const newCount = Math.max(0, (currentCounts[key] || 0) + delta);
-                    return { ...prev, [dKey]: { ...currentCounts, [key]: newCount } };
-                });
-            };
-
-            const copyAndOpenCybozu = () => {
-                const todayStr = formatShortDate(new Date());
-
-                let hasPastCounts = false;
-                for (let i = 1; i < 5; i++) {
-                    const d = new Date();
-                    d.setDate(d.getDate() - i);
-                    const key = formatDateKey(d);
-                    if (matrixCounts[key]) {
-                        if (Object.values(matrixCounts[key]).some(v => v > 0)) {
-                            hasPastCounts = true;
-                            break;
-                        }
-                    }
-                }
-
-                let newsText = `${todayStr}蛻・n\n`;
-
-                NEWSPAPERS.forEach(np => {
-                    newsText += `笆${np.label}\n`;
-                    const dots = [];
-                    for (let i = 4; i >= 0; i--) {
-                        const date = new Date();
-                        date.setDate(date.getDate() - i);
-                        const dKey = formatDateKey(date);
-                        const count = matrixCounts[dKey]?.[np.key] || 0;
-                        if (count > 0) {
-                            for (let c = 0; c < count; c++) {
-                                if (hasPastCounts) {
-                                    dots.push(`繝ｻ・・{formatShortDate(date)}・荏);
-                        } else {
-                            dots.push(`繝ｻ`);
-                        }
-                    }
-                }
-            }
-            if (dots.length > 0) newsText += dots.join('\n') + '\n';
-            newsText += '\n';
-        });
-
-        const titlesList = clips.map(c => c.title ? `繝ｻ${ c.title }` : null).filter(Boolean).join('\n');
-        const copyText = newsText + titlesList;
-        copyToClipboardFallback(copyText);
-        window.open('https://op7oo.cybozu.com/o/ag.cgi?page=MyFolderMessageView&mid=455345&mdbid=10', '_blank');
-    };
-
-    const createPdfBlob = async (targetClips = clips) => {
-        if (!window.PDFLib || targetClips.length === 0) return null;
-        const { PDFDocument } = window.PDFLib;
-        const doc = await PDFDocument.create();
-        const A4_WIDTH = 595.28, A4_HEIGHT = 841.89;
-        for (const clip of targetClips) {
-            const image = await doc.embedJpg(clip.dataUrl);
-            const { width: imgW, height: imgH } = image.scale(1.0);
-            const isLandscape = imgW > imgH;
-            const pageWidth = isLandscape ? A4_HEIGHT : A4_WIDTH;
-            const pageHeight = isLandscape ? A4_WIDTH : A4_HEIGHT;
-            const page = doc.addPage([pageWidth, pageHeight]);
-            const margin = 20;
-            const availW = pageWidth - margin * 2, availH = pageHeight - margin * 2;
-            const baseScale = Math.min(availW / imgW, availH / imgH);
-            const userScale = (clip.scalePercent || 100) / 100;
-            const finalScale = baseScale * userScale;
-            const drawW = imgW * finalScale, drawH = imgH * finalScale;
-            page.drawImage(image, { x: (pageWidth - drawW) / 2, y: (pageHeight - drawH) / 2, width: drawW, height: drawH });
-        }
-        return new Blob([await doc.save()], { type: 'application/pdf' });
-    };
-
-    const downloadPDF = async () => {
-        const blob = await createPdfBlob();
-        if (!blob) return;
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        const fileName = outputFileName.trim() || 'merged_document';
-        link.download = fileName.toLowerCase().endsWith('.pdf') ? fileName : `${ fileName }.pdf`;
-        link.click();
-    };
-
-    const downloadSplitPDFs = async () => {
-        if (!window.JSZip || clips.length === 0) return;
-        const zip = new window.JSZip();
-        let clipIndex = 0;
-
-        // 譌･莉・ 蜿､縺・・(4譌･蜑・-> 莉頑律)
-        for (let i = 4; i >= 0; i--) {
-            const date = new Date();
-            date.setDate(date.getDate() - i);
+        const updateMatrixCount = (date, key, delta) => {
             const dKey = formatDateKey(date);
-            const dateStr = formatDate(date); // YYYY.MM.DD
+            setMatrixCounts(prev => {
+                const currentCounts = prev[dKey] || { nikkei: 0, agri: 0, mj: 0, commercial: 0 };
+                const newCount = Math.max(0, (currentCounts[key] || 0) + delta);
+                return { ...prev, [dKey]: { ...currentCounts, [key]: newCount } };
+            });
+        };
 
-            // 譁ｰ閨樣・
-            let dateClips = [];
-            for (const np of NEWSPAPERS) {
-                const count = matrixCounts[dKey]?.[np.key] || 0;
-                if (count > 0) {
-                    // 繧ｯ繝ｪ繝・・繝ｪ繧ｹ繝医°繧牙ｿ・ｦ∵焚蛻・叙蠕・
-                    const slice = clips.slice(clipIndex, clipIndex + count);
-                    dateClips = [...dateClips, ...slice];
-                    clipIndex += count;
+        const copyAndOpenCybozu = () => {
+            const todayStr = formatShortDate(new Date());
+
+            let hasPastCounts = false;
+            for (let i = 1; i < 5; i++) {
+                const d = new Date();
+                d.setDate(d.getDate() - i);
+                const key = formatDateKey(d);
+                if (matrixCounts[key]) {
+                    if (Object.values(matrixCounts[key]).some(v => v > 0)) {
+                        hasPastCounts = true;
+                        break;
+                    }
                 }
             }
 
-            if (dateClips.length > 0) {
-                const blob = await createPdfBlob(dateClips);
-                if (blob) zip.file(`${ dateStr }.pdf`, blob);
+            let newsText = `${todayStr}分\n\n`;
+
+            NEWSPAPERS.forEach(np => {
+                newsText += `■${np.label}\n`;
+                const dots = [];
+                for (let i = 4; i >= 0; i--) {
+                    const date = new Date();
+                    date.setDate(date.getDate() - i);
+                    const dKey = formatDateKey(date);
+                    const count = matrixCounts[dKey]?.[np.key] || 0;
+                    if (count > 0) {
+                        for (let c = 0; c < count; c++) {
+                            if (hasPastCounts) {
+                                dots.push(`・（${formatShortDate(date)}）`);
+                            } else {
+                                dots.push(`・`);
+                            }
+                        }
+                    }
+                }
+                if (dots.length > 0) newsText += dots.join('\n') + '\n';
+                newsText += '\n';
+            });
+
+            const titlesList = clips.map(c => c.title ? `・${c.title}` : null).filter(Boolean).join('\n');
+            const copyText = newsText + titlesList;
+            copyToClipboardFallback(copyText);
+            window.open('https://op7oo.cybozu.com/o/ag.cgi?page=MyFolderMessageView&mid=455345&mdbid=10', '_blank');
+        };
+
+        const createPdfBlob = async (targetClips = clips) => {
+            if (!window.PDFLib || targetClips.length === 0) return null;
+            const { PDFDocument } = window.PDFLib;
+            const doc = await PDFDocument.create();
+            const A4_WIDTH = 595.28, A4_HEIGHT = 841.89;
+            for (const clip of targetClips) {
+                const image = await doc.embedJpg(clip.dataUrl);
+                const { width: imgW, height: imgH } = image.scale(1.0);
+                const isLandscape = imgW > imgH;
+                const pageWidth = isLandscape ? A4_HEIGHT : A4_WIDTH;
+                const pageHeight = isLandscape ? A4_WIDTH : A4_HEIGHT;
+                const page = doc.addPage([pageWidth, pageHeight]);
+                const margin = 20;
+                const availW = pageWidth - margin * 2, availH = pageHeight - margin * 2;
+                const baseScale = Math.min(availW / imgW, availH / imgH);
+                const userScale = (clip.scalePercent || 100) / 100;
+                const finalScale = baseScale * userScale;
+                const drawW = imgW * finalScale, drawH = imgH * finalScale;
+                page.drawImage(image, { x: (pageWidth - drawW) / 2, y: (pageHeight - drawH) / 2, width: drawW, height: drawH });
             }
-        }
+            return new Blob([await doc.save()], { type: 'application/pdf' });
+        };
 
-        // 菴吶▲縺溘け繝ｪ繝・・縺後≠繧後・縲後◎縺ｮ莉悶阪↓蜈･繧後ｋ
-        if (clipIndex < clips.length) {
-            const extraClips = clips.slice(clipIndex);
-            const blob = await createPdfBlob(extraClips);
-            if (blob) zip.file(`others_${ formatDate(new Date())
-                                }.pdf`, blob);
-        }
+        const downloadPDF = async () => {
+            const blob = await createPdfBlob();
+            if (!blob) return;
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            const fileName = outputFileName.trim() || 'merged_document';
+            link.download = fileName.toLowerCase().endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+            link.click();
+        };
 
-        const content = await zip.generateAsync({ type: "blob" });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(content);
-        link.download = `split_pdfs_${ formatDate(new Date()) }.zip`;
-        link.click();
-    };
+        const downloadSplitPDFs = async () => {
+            if (!window.JSZip || clips.length === 0) return;
+            const zip = new window.JSZip();
+            let clipIndex = 0;
 
-    const previewPDF = async () => { const blob = await createPdfBlob(); if (blob) setPreviewUrl(URL.createObjectURL(blob)); };
-    const changePage = (delta) => {
-        if (selectedFileIndex === null) return;
-        const newPage = currentPage + delta;
-        if (newPage >= 1 && newPage <= files[selectedFileIndex].pageCount) { setCurrentPage(newPage); setMasks([]); }
-    };
+            // 譌･莉・ 蜿､縺・・(4譌･蜑・-> 莉頑律)
+            for (let i = 4; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                const dKey = formatDateKey(date);
+                const dateStr = formatDate(date); // YYYY.MM.DD
 
-    const selectFile = (index) => {
-        if (editingClipId && !confirm("邱ｨ髮・ｸｭ縺ｧ縺吶らｴ譽・＠縺ｦ蛻･縺ｮ繝輔ぃ繧､繝ｫ繧帝幕縺阪∪縺吶°・・)) return;
+                // 譁ｰ閨樣・
+                let dateClips = [];
+                for (const np of NEWSPAPERS) {
+                    const count = matrixCounts[dKey]?.[np.key] || 0;
+                    if (count > 0) {
+                        // 繧ｯ繝ｪ繝・・繝ｪ繧ｹ繝医°繧牙ｿ・ｦ∵焚蛻・叙蠕・
+                        const slice = clips.slice(clipIndex, clipIndex + count);
+                        dateClips = [...dateClips, ...slice];
+                        clipIndex += count;
+                    }
+                }
+
+                if (dateClips.length > 0) {
+                    const blob = await createPdfBlob(dateClips);
+                    if (blob) zip.file(`${dateStr}.pdf`, blob);
+                }
+            }
+
+            // 菴吶▲縺溘け繝ｪ繝・・縺後≠繧後・縲後◎縺ｮ莉悶阪↓蜈･繧後ｋ
+            if (clipIndex < clips.length) {
+                const extraClips = clips.slice(clipIndex);
+                const blob = await createPdfBlob(extraClips);
+                if (blob) zip.file(`others_${formatDate(new Date())
+                    }.pdf`, blob);
+            }
+
+            const content = await zip.generateAsync({ type: "blob" });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(content);
+            link.download = `split_pdfs_${formatDate(new Date())}.zip`;
+            link.click();
+        };
+
+        const previewPDF = async () => { const blob = await createPdfBlob(); if (blob) setPreviewUrl(URL.createObjectURL(blob)); };
+        const changePage = (delta) => {
+            if (selectedFileIndex === null) return;
+            const newPage = currentPage + delta;
+            if (newPage >= 1 && newPage <= files[selectedFileIndex].pageCount) { setCurrentPage(newPage); setMasks([]); }
+        };
+
+        const selectFile = (index) => {
+            if (editingClipId && !confirm("邱ｨ髮・ｸｭ縺ｧ縺吶らｴ譽・＠縺ｦ蛻･縺ｮ繝輔ぃ繧､繝ｫ繧帝幕縺阪∪縺吶°・・)) return;
         setEditingClipId(null);
-        setSelectedFileIndex(index);
-        setCurrentPage(1);
-        setRotation(0);
-        setMasks([]);
-        setCropRect({ x: 0, y: 0, w: 0, h: 0 });
-        setZoomLevel(1.0);
-        setMode('view');
-    };
+            setSelectedFileIndex(index);
+            setCurrentPage(1);
+            setRotation(0);
+            setMasks([]);
+            setCropRect({ x: 0, y: 0, w: 0, h: 0 });
+            setZoomLevel(1.0);
+            setMode('view');
+        };
 
-    const removeMask = (index) => { setMasks(masks.filter((_, i) => i !== index)); };
-    const removeClip = (id) => { setClips(clips.filter(c => c.id !== id)); if (editingClipId === id) setEditingClipId(null); };
-    const cancelEdit = () => { setEditingClipId(null); };
+        const removeMask = (index) => { setMasks(masks.filter((_, i) => i !== index)); };
+        const removeClip = (id) => { setClips(clips.filter(c => c.id !== id)); if (editingClipId === id) setEditingClipId(null); };
+        const cancelEdit = () => { setEditingClipId(null); };
 
-    const RectHandles = ({ x, y, w, h, color }) => {
-        const hs = 1.5;
+        const RectHandles = ({ x, y, w, h, color }) => {
+            const hs = 1.5;
+            return (
+                <g fill={color} stroke="white" strokeWidth="1">
+                    <rect x={`${x * 100 - hs / 2}% `} y={`${y * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
+                    <rect x={`${(x + w) * 100 - hs / 2}% `} y={`${y * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
+                    <rect x={`${x * 100 - hs / 2}% `} y={`${(y + h) * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
+                    <rect x={`${(x + w) * 100 - hs / 2}% `} y={`${(y + h) * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
+                </g>
+            );
+        };
+
         return (
-            <g fill={color} stroke="white" strokeWidth="1">
-                <rect x={`${ x * 100 - hs / 2 }% `} y={`${ y * 100 - hs / 2 }% `} width={`${ hs }% `} height={`${ hs }% `} />
-                <rect x={`${ (x + w) * 100 - hs / 2 }% `} y={`${ y * 100 - hs / 2 }% `} width={`${ hs }% `} height={`${ hs }% `} />
-                <rect x={`${ x * 100 - hs / 2 }% `} y={`${ (y + h) * 100 - hs / 2 }% `} width={`${ hs }% `} height={`${ hs }% `} />
-                <rect x={`${ (x + w) * 100 - hs / 2 }% `} y={`${ (y + h) * 100 - hs / 2 }% `} width={`${ hs }% `} height={`${ hs }% `} />
-            </g>
-        );
-    };
-
-    return (
-        <div className="flex flex-col h-screen bg-gray-100 text-gray-800 font-sans" onDragOver={(e) => e.preventDefault()} onDrop={onDrop} onPaste={onPaste}>
-            <header className="bg-white shadow px-4 py-3 flex items-center justify-between z-10">
-                <div className="flex items-center gap-2">
-                    <Scissors className="text-blue-600 w-6 h-6" />
-                    <h1 className="text-xl font-bold text-gray-700">PDF Clipper & Merger</h1>
-                </div>
-                <div className="flex gap-2">
-                    <button onClick={() => setSettingsOpen(true)} className="p-2 hover:bg-gray-100 rounded transition" title="險ｭ螳・>
+            <div className="flex flex-col h-screen bg-gray-100 text-gray-800 font-sans" onDragOver={(e) => e.preventDefault()} onDrop={onDrop} onPaste={onPaste}>
+                <header className="bg-white shadow px-4 py-3 flex items-center justify-between z-10">
+                    <div className="flex items-center gap-2">
+                        <Scissors className="text-blue-600 w-6 h-6" />
+                        <h1 className="text-xl font-bold text-gray-700">PDF Clipper & Merger</h1>
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={() => setSettingsOpen(true)} className="p-2 hover:bg-gray-100 rounded transition" title="險ｭ螳・>
                         <Settings className="w-5 h-5 text-gray-600" />
                     </button>
                     <label className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded cursor-pointer transition">
@@ -686,145 +687,146 @@ const PDFClipperApp = () => {
                         <input type="file" multiple accept="application/pdf" className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
                     </label>
                     <div className="flex gap-1">
-                        <button onClick={previewPDF} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - blue - 600 border border - blue - 600 font - bold transition ${ clips.length > 0 ? 'hover:bg-blue-50' : 'opacity-50 cursor-not-allowed' } `} title="繝励Ξ繝薙Η繝ｼ">
+                        <button onClick={previewPDF} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - blue - 600 border border - blue - 600 font - bold transition ${clips.length > 0 ? 'hover:bg-blue-50' : 'opacity-50 cursor-not-allowed'} `} title="繝励Ξ繝薙Η繝ｼ">
                             <Eye className="w-4 h-4" /><span className="hidden sm:inline">繝励Ξ繝薙Η繝ｼ</span>
                         </button>
-                        <button onClick={downloadSplitPDFs} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - white font - bold transition ${ clips.length > 0 ? 'bg-teal-600 hover:bg-teal-700' : 'bg-gray-400 cursor-not-allowed' } `} title="譌･莉倥＃縺ｨ縺ｫ蛻・牡縺励※繝繧ｦ繝ｳ繝ｭ繝ｼ繝・>
+                        <button onClick={downloadSplitPDFs} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - white font - bold transition ${clips.length > 0 ? 'bg-teal-600 hover:bg-teal-700' : 'bg-gray-400 cursor-not-allowed'} `} title="譌･莉倥＃縺ｨ縺ｫ蛻・牡縺励※繝繧ｦ繝ｳ繝ｭ繝ｼ繝・>
                             <Download className="w-4 h-4" />蛻・牡DL
-                        </button>
-                        <button onClick={downloadPDF} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - white font - bold transition ${ clips.length > 0 ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed' } `}>
-                            <FileText className="w-4 h-4" />荳諡ｬPDF
-                        </button>
-                    </div>
-                </div>
-            </header>
+                    </button>
+                    <button onClick={downloadPDF} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - white font - bold transition ${clips.length > 0 ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'} `}>
+                        <FileText className="w-4 h-4" />荳諡ｬPDF
+                    </button>
+            </div>
+                </div >
+            </header >
 
-            <div className="flex flex-1 overflow-hidden">
-                {/* Left Sidebar */}
-                <div className="flex flex-1 overflow-hidden relative">
-                    {/* Left Sidebar */}
-                    <div className={`${ leftSidebarOpen ? 'w-64 border-r' : 'w-0 border-none' } bg - white overflow - y - auto flex flex - col flex - shrink - 0 transition - all duration - 300 z - 10`}>
-                        {/* Matrix Counter */}
-                        <div className="p-2 bg-gray-50 border-b">
-                            <div className="text-xs font-bold text-gray-500 mb-2 px-1">險倅ｺ区焚繧ｫ繧ｦ繝ｳ繧ｿ繝ｼ</div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-center text-xs border-collapse">
-                                    <thead>
-                                        <tr>
-                                            <th className="p-1 text-left font-normal text-gray-400 w-16"></th>
-                                            {[0, 1, 2, 3, 4].map(daysAgo => {
+    <div className="flex flex-1 overflow-hidden">
+        {/* Left Sidebar */}
+        <div className="flex flex-1 overflow-hidden relative">
+            {/* Left Sidebar */}
+            <div className={`${leftSidebarOpen ? 'w-64 border-r' : 'w-0 border-none'} bg - white overflow - y - auto flex flex - col flex - shrink - 0 transition - all duration - 300 z - 10`}>
+                {/* Matrix Counter */}
+                <div className="p-2 bg-gray-50 border-b">
+                    <div className="text-xs font-bold text-gray-500 mb-2 px-1">記事数カウンター</div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-center text-xs border-collapse">
+                            <thead>
+                                <tr>
+                                    <th className="p-1 text-left font-normal text-gray-400 w-16"></th>
+                                    {[0, 1, 2, 3, 4].map(daysAgo => {
+                                        const d = new Date();
+                                        d.setDate(d.getDate() - daysAgo);
+                                        const isToday = daysAgo === 0;
+                                        return (
+                                            <th key={daysAgo} className={`p - 1 font - normal border - b min - w - [30px] ${isToday ? 'text-blue-600 font-bold' : 'text-gray-500'} `}>
+                                                {formatShortDate(d)}
+                                            </th>
+                                        );
+                                    })}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {NEWSPAPERS.map(np => (
+                                    <tr key={np.key} className="border-b last:border-0 bg-white">
+                                        <td className="p-1 text-left font-bold text-gray-600 whitespace-nowrap">{np.label.replace('日本', '').replace('経済', '').replace('産経', '')}</td>
+                                        {
+                                            [0, 1, 2, 3, 4].map(daysAgo => {
                                                 const d = new Date();
                                                 d.setDate(d.getDate() - daysAgo);
-                                                const isToday = daysAgo === 0;
+                                                const dKey = formatDateKey(d);
+                                                const count = matrixCounts[dKey]?.[np.key] || 0;
                                                 return (
-                                                    <th key={daysAgo} className={`p - 1 font - normal border - b min - w - [30px] ${ isToday ? 'text-blue-600 font-bold' : 'text-gray-500' } `}>
-                                                        {formatShortDate(d)}
-                                                    </th>
+                                                    <td
+                                                        key={daysAgo}
+                                                        className={`p - 1 cursor - pointer select - none hover: bg - blue - 50 transition border - l border - gray - 100 ${count > 0 ? 'text-blue-600 font-bold' : 'text-gray-300'} `}
+                                                        onClick={() => updateMatrixCount(d, np.key, 1)}
+                                                        onContextMenu={(e) => { e.preventDefault(); updateMatrixCount(d, np.key, -1); }}
+                                                    >
+                                                        {count > 0 ? count : '-'}
+                                                    </td>
                                                 );
-                                            })}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {NEWSPAPERS.map(np => (
-                                            <tr key={np.key} className="border-b last:border-0 bg-white">
-                                                <td className="p-1 text-left font-bold text-gray-600 whitespace-nowrap">{np.label.replace('譌･譛ｬ', '').replace('譁ｰ閨・, '').replace('譁ｽ險ｭ', '')}</td>
-                                                {[0, 1, 2, 3, 4].map(daysAgo => {
-                                                    const d = new Date();
-                                                    d.setDate(d.getDate() - daysAgo);
-                                                    const dKey = formatDateKey(d);
-                                                    const count = matrixCounts[dKey]?.[np.key] || 0;
-                                                    return (
-                                                        <td
-                                                            key={daysAgo}
-                                                            className={`p - 1 cursor - pointer select - none hover: bg - blue - 50 transition border - l border - gray - 100 ${ count > 0 ? 'text-blue-600 font-bold' : 'text-gray-300' } `}
-                                                            onClick={() => updateMatrixCount(d, np.key, 1)}
-                                                            onContextMenu={(e) => { e.preventDefault(); updateMatrixCount(d, np.key, -1); }}
-                                                        >
-                                                            {count > 0 ? count : '-'}
-                                                        </td>
-                                                    );
-                                                })}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div className="text-[10px] text-gray-400 mt-1 text-right px-1">蟾ｦ=蠅・/ 蜿ｳ=貂・/div>
-                        </div>
-
-                        <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500">繧｢繝・・繝ｭ繝ｼ繝画ｸ医∩繝輔ぃ繧､繝ｫ</div>
-                        <div className="flex-1 p-2 space-y-2">
-                            {files.map((file, idx) => (
-                                <div key={idx} onClick={() => selectFile(idx)} className={`p - 3 rounded cursor - pointer flex items - center gap - 3 transition ${ selectedFileIndex === idx ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50 border border-transparent' } `}>
-                                    <FileText className={`w - 5 h - 5 ${ selectedFileIndex === idx ? 'text-blue-600' : 'text-gray-400' } `} />
-                                    <div className="overflow-hidden"><div className="text-sm font-medium truncate">{file.name}</div><div className="text-xs text-gray-500">{file.pageCount} pages</div></div>
-                                </div>
-                            ))}
-                            {files.length === 0 && <div className="text-center p-8 text-gray-400 text-sm">PDF繧偵％縺薙↓繝峨Λ繝・げ<br />縺ｾ縺溘・雋ｼ繧贋ｻ倥￠(Ctrl+V)</div>}
-                        </div>
+                                            })
+                                        }
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        <div className="text-[10px] text-gray-400 mt-1 text-right px-1">左=増 / 右=減</div>
                     </div>
 
-                    {/* Main Editor */}
-                    <div className="flex-1 flex flex-col bg-gray-100 relative min-w-0">
-                        {/* Sidebar Toggles */}
-                        <button
-                            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-                            className="absolute top-1/2 left-0 z-20 transform -translate-y-1/2 bg-white border border-gray-300 rounded-r shadow-md p-1 hover:bg-gray-100 text-gray-500"
-                            title={leftSidebarOpen ? "繧ｵ繧､繝峨ヰ繝ｼ繧帝哩縺倥ｋ" : "繧ｵ繧､繝峨ヰ繝ｼ繧帝幕縺・}
-                        >
-                            {leftSidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-                        </button>
-                        <button
-                            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
-                            className="absolute top-1/2 right-0 z-20 transform -translate-y-1/2 bg-white border border-gray-300 rounded-l shadow-md p-1 hover:bg-gray-100 text-gray-500"
-                            title={rightSidebarOpen ? "繧ｵ繧､繝峨ヰ繝ｼ繧帝哩縺倥ｋ" : "繧ｵ繧､繝峨ヰ繝ｼ繧帝幕縺・}
-                        >
-                            {rightSidebarOpen ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-                        </button>
-                        {/* Toolbar */}
-                        <div className="h-14 bg-white border-b flex items-center justify-between px-4 gap-4 z-10">
-                            <div className="flex items-center gap-1">
-                                <button onClick={() => setMode(mode === 'crop' ? 'view' : 'crop')} className={`flex items - center gap - 1 px - 3 py - 1.5 rounded text - sm transition ${ mode === 'crop' ? 'bg-green-100 text-green-700 font-bold ring-2 ring-green-500 ring-offset-1' : 'hover:bg-gray-100 text-gray-600' } `}>
-                                    <Scissors className="w-4 h-4" /> 蛻・ｊ謚懊″譫
-                                </button>
-                                <button onClick={() => setMode(mode === 'mask' ? 'view' : 'mask')} className={`flex items - center gap - 1 px - 3 py - 1.5 rounded text - sm transition ${ mode === 'mask' ? 'bg-red-100 text-red-700 font-bold ring-2 ring-red-500 ring-offset-1' : 'hover:bg-gray-100 text-gray-600' } `}>
-                                    <Eraser className="w-4 h-4" /> 逋ｽ蝪励ｊ
-                                </button>
-                                <div className="w-px h-6 bg-gray-300 mx-2"></div>
-                                <div className="flex items-center gap-1 bg-gray-100 p-1 rounded">
-                                    <button onClick={() => setRotation(r => Number((r - 1).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="-1ﾂｰ"><ChevronLeft className="w-4 h-4 text-gray-600" /></button>
-                                    <button onClick={() => setRotation(r => Number((r - 0.1).toFixed(1)))} className="px-1 py-0.5 hover:bg-gray-200 rounded text-[10px] font-bold text-gray-600" title="-0.1ﾂｰ">-0.1</button>
-                                    <div className="w-24 px-2 flex flex-col items-center">
-                                        <span className="text-[10px] text-gray-500">{rotation.toFixed(1)}ﾂｰ</span>
-                                        <input type="range" min="-180" max="180" step="0.1" value={rotation} onChange={(e) => setRotation(parseFloat(e.target.value))} className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer" />
-                                    </div>
-                                    <button onClick={() => setRotation(r => Number((r + 0.1).toFixed(1)))} className="px-1 py-0.5 hover:bg-gray-200 rounded text-[10px] font-bold text-gray-600" title="+0.1ﾂｰ">+0.1</button>
-                                    <button onClick={() => setRotation(r => Number((r + 1).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="+1ﾂｰ"><ChevronRight className="w-4 h-4 text-gray-600" /></button>
-                                    <div className="w-px h-4 bg-gray-300 mx-1"></div>
-                                    <button onClick={() => setRotation(r => Number((r + 90).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="+90ﾂｰ"><RefreshCw className="w-4 h-4 text-gray-600" /></button>
-                                </div>
-                                <div className="flex items-center gap-1 ml-2 bg-gray-100 rounded px-2">
-                                    <button onClick={() => setZoomLevel(z => Math.max(z - 0.05, 0.5))} className="p-1 hover:text-blue-600"><ZoomOut className="w-4 h-4" /></button>
-                                    <span className="text-xs w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
-                                    <button onClick={() => setZoomLevel(z => Math.min(z + 0.05, 3.0))} className="p-1 hover:text-blue-600"><ZoomIn className="w-4 h-4" /></button>
-                                </div>
+                    <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500">アップロード済みファイル</div>
+                    <div className="flex-1 p-2 space-y-2">
+                        {files.map((file, idx) => (
+                            <div key={idx} onClick={() => selectFile(idx)} className={`p - 3 rounded cursor - pointer flex items - center gap - 3 transition ${selectedFileIndex === idx ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50 border border-transparent'} `}>
+                                <FileText className={`w - 5 h - 5 ${selectedFileIndex === idx ? 'text-blue-600' : 'text-gray-400'} `} />
+                                <div className="overflow-hidden"><div className="text-sm font-medium truncate">{file.name}</div><div className="text-xs text-gray-500">{file.pageCount} pages</div></div>
                             </div>
-                            {selectedFileIndex !== null && (
-                                <div className="flex items-center gap-2 bg-gray-100 px-2 py-1 rounded">
-                                    <button onClick={() => changePage(-1)} disabled={currentPage <= 1} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm disabled:opacity-50 text-sm">&lt;</button>
-                                    <span className="text-xs font-medium whitespace-nowrap px-1">P.{currentPage} / {files[selectedFileIndex].pageCount}</span>
-                                    <button onClick={() => changePage(1)} disabled={currentPage >= files[selectedFileIndex].pageCount} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm disabled:opacity-50 text-sm">&gt;</button>
+                        ))}
+                        {files.length === 0 && <div className="text-center p-8 text-gray-400 text-sm">PDFをここにドラッグ<br />または貼り付け(Ctrl+V)</div>}
+                    </div>
+                </div>
+
+                {/* Main Editor */}
+                <div className="flex-1 flex flex-col bg-gray-100 relative min-w-0">
+                    {/* Sidebar Toggles */}
+                    <button
+                        onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+                        className="absolute top-1/2 left-0 z-20 transform -translate-y-1/2 bg-white border border-gray-300 rounded-r shadow-md p-1 hover:bg-gray-100 text-gray-500"
+                        title={leftSidebarOpen ? "サイドバーを閉じる" : "サイドバーを開く"}
+                    >
+                        {leftSidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+                    </button>
+                    <button
+                        onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+                        className="absolute top-1/2 right-0 z-20 transform -translate-y-1/2 bg-white border border-gray-300 rounded-l shadow-md p-1 hover:bg-gray-100 text-gray-500"
+                        title={rightSidebarOpen ? "サイドバーを閉じる" : "サイドバーを開く"}
+                    >
+                        {rightSidebarOpen ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+                    </button>
+                    {/* Toolbar */}
+                    <div className="h-14 bg-white border-b flex items-center justify-between px-4 gap-4 z-10">
+                        <div className="flex items-center gap-1">
+                            <button onClick={() => setMode(mode === 'crop' ? 'view' : 'crop')} className={`flex items - center gap - 1 px - 3 py - 1.5 rounded text - sm transition ${mode === 'crop' ? 'bg-green-100 text-green-700 font-bold ring-2 ring-green-500 ring-offset-1' : 'hover:bg-gray-100 text-gray-600'} `}>
+                                <Scissors className="w-4 h-4" /> 切り抜き
+                            </button>
+                            <button onClick={() => setMode(mode === 'mask' ? 'view' : 'mask')} className={`flex items - center gap - 1 px - 3 py - 1.5 rounded text - sm transition ${mode === 'mask' ? 'bg-red-100 text-red-700 font-bold ring-2 ring-red-500 ring-offset-1' : 'hover:bg-gray-100 text-gray-600'} `}>
+                                <Eraser className="w-4 h-4" /> 白塗り
+                            </button>
+                            <div className="w-px h-6 bg-gray-300 mx-2"></div>
+                            <div className="flex items-center gap-1 bg-gray-100 p-1 rounded">
+                                <button onClick={() => setRotation(r => Number((r - 1).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="-1°"><ChevronLeft className="w-4 h-4 text-gray-600" /></button>
+                                <button onClick={() => setRotation(r => Number((r - 0.1).toFixed(1)))} className="px-1 py-0.5 hover:bg-gray-200 rounded text-[10px] font-bold text-gray-600" title="-0.1°">-0.1</button>
+                                <div className="w-24 px-2 flex flex-col items-center">
+                                    <span className="text-[10px] text-gray-500">{rotation.toFixed(1)}ﾂｰ</span>
+                                    <input type="range" min="-180" max="180" step="0.1" value={rotation} onChange={(e) => setRotation(parseFloat(e.target.value))} className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer" />
                                 </div>
-                            )}
-                            <div className="flex items-center gap-2">
-                                {editingClipId && <button onClick={cancelEdit} className="px-3 py-1.5 text-gray-600 text-sm hover:bg-gray-100 rounded">繧ｭ繝｣繝ｳ繧ｻ繝ｫ</button>}
-                                <button onClick={saveClip} className={`flex items - center gap - 2 px - 4 py - 1.5 rounded text - sm font - bold shadow - sm transition ${ editingClipId ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white' } `}>
-                                    {editingClipId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                                    {editingClipId ? '譖ｴ譁ｰ縺励※菫晏ｭ・ : '繝ｪ繧ｹ繝医↓霑ｽ蜉'}
-                                </button>
+                                <button onClick={() => setRotation(r => Number((r + 0.1).toFixed(1)))} className="px-1 py-0.5 hover:bg-gray-200 rounded text-[10px] font-bold text-gray-600" title="+0.1ﾂｰ">+0.1</button>
+                                <button onClick={() => setRotation(r => Number((r + 1).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="+1ﾂｰ"><ChevronRight className="w-4 h-4 text-gray-600" /></button>
+                                <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                                <button onClick={() => setRotation(r => Number((r + 90).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="+90ﾂｰ"><RefreshCw className="w-4 h-4 text-gray-600" /></button>
+                            </div>
+                            <div className="flex items-center gap-1 ml-2 bg-gray-100 rounded px-2">
+                                <button onClick={() => setZoomLevel(z => Math.max(z - 0.05, 0.5))} className="p-1 hover:text-blue-600"><ZoomOut className="w-4 h-4" /></button>
+                                <span className="text-xs w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
+                                <button onClick={() => setZoomLevel(z => Math.min(z + 0.05, 3.0))} className="p-1 hover:text-blue-600"><ZoomIn className="w-4 h-4" /></button>
                             </div>
                         </div>
-                        {editingClipId && <div className="bg-orange-100 text-orange-800 text-xs px-4 py-1 text-center font-bold border-b border-orange-200">繝ｪ繧ｹ繝医い繧､繝・Β縺ｮ蜀咲ｷｨ髮・ｸｭ縺ｧ縺吶・/div>}
+                        {selectedFileIndex !== null && (
+                            <div className="flex items-center gap-2 bg-gray-100 px-2 py-1 rounded">
+                                <button onClick={() => changePage(-1)} disabled={currentPage <= 1} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm disabled:opacity-50 text-sm">&lt;</button>
+                                <span className="text-xs font-medium whitespace-nowrap px-1">P.{currentPage} / {files[selectedFileIndex].pageCount}</span>
+                                <button onClick={() => changePage(1)} disabled={currentPage >= files[selectedFileIndex].pageCount} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm disabled:opacity-50 text-sm">&gt;</button>
+                            </div>
+                        )}
+                        <div className="flex items-center gap-2">
+                            {editingClipId && <button onClick={cancelEdit} className="px-3 py-1.5 text-gray-600 text-sm hover:bg-gray-100 rounded">繧ｭ繝｣繝ｳ繧ｻ繝ｫ</button>}
+                            <button onClick={saveClip} className={`flex items - center gap - 2 px - 4 py - 1.5 rounded text - sm font - bold shadow - sm transition ${editingClipId ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'} `}>
+                                {editingClipId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                                {editingClipId ? '譖ｴ譁ｰ縺励※菫晏ｭ・ : '繝ｪ繧ｹ繝医↓霑ｽ蜉'}
+                            </button>
+                        </div>
+                    </div>
+                    {editingClipId && <div className="bg-orange-100 text-orange-800 text-xs px-4 py-1 text-center font-bold border-b border-orange-200">繝ｪ繧ｹ繝医い繧､繝・Β縺ｮ蜀咲ｷｨ髮・ｸｭ縺ｧ縺吶・/div>}
                         {/* Canvas */}
                         <div className="flex-1 overflow-auto p-8 flex items-start relative bg-gray-200/50" ref={containerRef}>
                             {selectedFileIndex !== null ? (
@@ -833,21 +835,21 @@ const PDFClipperApp = () => {
                                     <svg className="absolute top-0 left-0 w-full h-full touch-none" style={{ pointerEvents: 'all', cursor: mode === 'view' ? 'default' : (interactionState.type === 'move' ? 'move' : 'default') }} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
                                         {cropRect.w > 0 && cropRect.h > 0 && (
                                             <>
-                                                <rect x={`${ cropRect.x * 100 }% `} y={`${ cropRect.y * 100 }% `} width={`${ cropRect.w * 100 }% `} height={`${ cropRect.h * 100 }% `} fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth={mode === 'crop' ? 2 : 1} strokeDasharray="5,5" style={{ pointerEvents: 'none' }} />
+                                                <rect x={`${cropRect.x * 100}% `} y={`${cropRect.y * 100}% `} width={`${cropRect.w * 100}% `} height={`${cropRect.h * 100}% `} fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth={mode === 'crop' ? 2 : 1} strokeDasharray="5,5" style={{ pointerEvents: 'none' }} />
                                                 {mode === 'crop' && <RectHandles x={cropRect.x} y={cropRect.y} w={cropRect.w} h={cropRect.h} color="#22c55e" />}
                                             </>
                                         )}
                                         {masks.map((m, i) => (
                                             <g key={i}>
-                                                <rect x={`${ m.x * 100 }% `} y={`${ m.y * 100 }% `} width={`${ m.w * 100 }% `} height={`${ m.h * 100 }% `} fill="rgba(239, 68, 68, 0.5)" stroke="#ef4444" strokeWidth="1" style={{ pointerEvents: 'none' }} />
+                                                <rect x={`${m.x * 100}% `} y={`${m.y * 100}% `} width={`${m.w * 100}% `} height={`${m.h * 100}% `} fill="rgba(239, 68, 68, 0.5)" stroke="#ef4444" strokeWidth="1" style={{ pointerEvents: 'none' }} />
                                                 {mode === 'mask' && (
                                                     <>
                                                         <RectHandles x={m.x} y={m.y} w={m.w} h={m.h} color="#ef4444" />
-                                                        <line x1={`${ m.x * 100 }% `} y1={`${ m.y * 100 }% `} x2={`${ (m.x + m.w) * 100 }% `} y2={`${ (m.y + m.h) * 100 }% `} stroke="#ef4444" strokeWidth="1" />
-                                                        <line x1={`${ (m.x + m.w) * 100 }% `} y1={`${ m.y * 100 }% `} x2={`${ m.x * 100 }% `} y2={`${ (m.y + m.h) * 100 }% `} stroke="#ef4444" strokeWidth="1" />
+                                                        <line x1={`${m.x * 100}% `} y1={`${m.y * 100}% `} x2={`${(m.x + m.w) * 100}% `} y2={`${(m.y + m.h) * 100}% `} stroke="#ef4444" strokeWidth="1" />
+                                                        <line x1={`${(m.x + m.w) * 100}% `} y1={`${m.y * 100}% `} x2={`${m.x * 100}% `} y2={`${(m.y + m.h) * 100}% `} stroke="#ef4444" strokeWidth="1" />
                                                         <g onClick={(e) => { e.stopPropagation(); removeMask(i); }} style={{ cursor: 'pointer', pointerEvents: 'all' }}>
-                                                            <circle cx={`${ (m.x + m.w) * 100 }% `} cy={`${ m.y * 100 }% `} r="8" fill="red" />
-                                                            <text x={`${ (m.x + m.w) * 100 }% `} y={`${ m.y * 100 }% `} dy="3" dx="-3" fill="white" fontSize="10" fontWeight="bold">ﾃ・/text>
+                                                            <circle cx={`${(m.x + m.w) * 100}% `} cy={`${m.y * 100}% `} r="8" fill="red" />
+                                                            <text x={`${(m.x + m.w) * 100}% `} y={`${m.y * 100}% `} dy="3" dx="-3" fill="white" fontSize="10" fontWeight="bold">ﾃ・/text>
                                                         </g>
                                                     </>
                                                 )}
@@ -866,19 +868,19 @@ const PDFClipperApp = () => {
                 </div>
 
                 {/* Right Sidebar */}
-                <div className={`${ rightSidebarOpen ? 'w-80 border-l' : 'w-0 border-none' } bg - white flex flex - col z - 20 shadow - lg flex - shrink - 0 transition - all duration - 300`}>
+                <div className={`${rightSidebarOpen ? 'w-80 border-l' : 'w-0 border-none'} bg - white flex flex - col z - 20 shadow - lg flex - shrink - 0 transition - all duration - 300`}>
                     <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500 flex justify-between items-center whitespace-nowrap overflow-hidden">
                         <span>邨仙粋繝ｪ繧ｹ繝・/span>
-                        <div className="flex gap-2 items-center">
-                            <span className="text-[10px] text-gray-400">AICost: ${totalCost.toFixed(4)}</span>
-                            <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="flex items-center gap-1 bg-purple-100 text-purple-600 px-2 py-1 rounded text-xs hover:bg-purple-200 transition disabled:opacity-50" title="縺吶∋縺ｦ縺ｮ繧ｯ繝ｪ繝・・繧但I隗｣譫・>
+                            <div className="flex gap-2 items-center">
+                                <span className="text-[10px] text-gray-400">AICost: ${totalCost.toFixed(4)}</span>
+                                <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="flex items-center gap-1 bg-purple-100 text-purple-600 px-2 py-1 rounded text-xs hover:bg-purple-200 transition disabled:opacity-50" title="縺吶∋縺ｦ縺ｮ繧ｯ繝ｪ繝・・繧但I隗｣譫・>
                                 <Sparkles className="w-3 h-3" />荳諡ｬ
                             </button>
                             <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">{clips.length}</span>
-                        </div>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-3 space-y-6">
-                        {clips.map((clip, idx) => (
+                </div>
+                <div className="flex-1 overflow-y-auto p-3 space-y-6">
+                    {clips.map((clip, idx) => (
                             <div key={clip.id} className={`group relative border rounded shadow - sm p - 2 transition ${ editingClipId === clip.id ? 'bg-orange-50 border-orange-300 ring-2 ring-orange-200' : 'bg-gray-50 hover:shadow-md' } `}>
                                 <div className="text-xs text-gray-400 mb-2 flex justify-between items-center">
                                     <span>#{idx + 1} {clip.aspectRatio > 1 ? '(讓ｪ)' : '(邵ｦ)'}</span>
@@ -905,7 +907,7 @@ const PDFClipperApp = () => {
                                 </div>
                             </div>
                         ))}
-                        {clips.length === 0 && <div className="text-center p-6 text-gray-400 text-xs">縲後Μ繧ｹ繝医↓霑ｽ蜉縲阪ｒ謚ｼ縺吶→<br />縺薙％縺ｫ逕ｻ蜒上′霑ｽ蜉縺輔ｌ縺ｾ縺・/div>}
+                {clips.length === 0 && <div className="text-center p-6 text-gray-400 text-xs">縲後Μ繧ｹ繝医↓霑ｽ蜉縲阪ｒ謚ｼ縺吶→<br />縺薙％縺ｫ逕ｻ蜒上′霑ｽ蜉縺輔ｌ縺ｾ縺・/div>}
                     </div>
                     <div className="p-4 border-t bg-gray-50 space-y-3">
                         <div className="space-y-2">
@@ -924,15 +926,16 @@ const PDFClipperApp = () => {
                         </div>
                     </div>
                 </div>
-            </div>
+        </div >
 
-            {/* Settings Modal */}
-            {settingsOpen && (
+        {/* Settings Modal */}
+        {
+            settingsOpen && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
                         <div className="flex items-center justify-between p-4 border-b">
                             <h3 className="font-bold text-gray-700 flex items-center gap-2"><Settings className="w-5 h-5" />險ｭ螳・/h3>
-                            <button onClick={() => setSettingsOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                                <button onClick={() => setSettingsOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
                         </div>
                         <div className="p-4 space-y-4">
                             <div>
@@ -956,10 +959,12 @@ const PDFClipperApp = () => {
                         </div>
                     </div>
                 </div>
-            )}
+            )
+        }
 
-            {/* Preview Modal */}
-            {previewUrl && (
+        {/* Preview Modal */}
+        {
+            previewUrl && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-8">
                     <div className="bg-white rounded-lg w-full h-full max-w-4xl max-h-full flex flex-col shadow-2xl animate-fade-in">
                         <div className="flex justify-between items-center p-3 border-b">
@@ -971,10 +976,12 @@ const PDFClipperApp = () => {
                         </div>
                     </div>
                 </div>
-            )}
+            )
+        }
 
-            {/* AI Result Modal */}
-            {aiModalOpen && (
+        {/* AI Result Modal */}
+        {
+            aiModalOpen && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col max-h-[80vh]">
                         <div className="flex items-center justify-between p-4 border-b">
@@ -992,9 +999,10 @@ const PDFClipperApp = () => {
                         </div>
                     </div>
                 </div>
-            )}
-        </div>
-    </div>
+            )
+        }
+    </div >
+    </div >
     );
 };
 
