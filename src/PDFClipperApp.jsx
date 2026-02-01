@@ -992,7 +992,7 @@ const PDFClipperApp = () => {
                 </div>
             )}
         </div>
-    </div >
+    </div > {/* end-root */ }
     );
 };
 
