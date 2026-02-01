@@ -58,6 +58,7 @@ const PDFClipperApp = () => {
     const [clips, setClips] = useState([]);
     const [fileDate, setFileDate] = useState(new Date());
     const [fileNamePrefix, setFileNamePrefix] = useState('【共有事項】');
+    const [outputFileName, setOutputFileName] = useState(`【共有事項】${formatDate(new Date())}`);
     // 新聞記事カウンター (Matrix: YYYY-MM-DD -> { key: count })
     const [matrixCounts, setMatrixCounts] = useState({});
     const [previewUrl, setPreviewUrl] = useState(null);
