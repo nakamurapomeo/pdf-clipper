@@ -1,5 +1,6 @@
 ﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Scissors, Eraser, Plus, Trash2, FileText, Download, Edit3, Save, Eye, ZoomIn, ZoomOut, Sparkles, ExternalLink, Copy, Loader2, Key, ChevronLeft, ChevronRight, RefreshCw, X, Check, Settings, Minus } from 'lucide-react';
+import { Upload, Scissors, Eraser, Plus, Trash2, FileText, Download, Edit3, Save, Eye, ZoomIn, ZoomOut, Sparkles, ExternalLink, Copy, Loader2, Key, ChevronLeft, ChevronRight, RefreshCw, X, Check, Settings, Minus, Clipboard } from 'lucide-react';
+
 
 // ライブラリの動的ロード用
 const useScript = (src) => {
@@ -43,12 +44,14 @@ const AI_MODELS = [
     { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', inputCost: 0.1, outputCost: 0.4 },
     { id: 'google/gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash', inputCost: 0.1, outputCost: 0.4 },
     { id: 'google/gemini-2.5-pro-preview', name: 'Gemini 2.5 Pro', inputCost: 1.25, outputCost: 5.0 },
+    { id: 'google/gemini-3.0-flash', name: 'Gemini 3.0 Flash', inputCost: 0.1, outputCost: 0.4 },
+    { id: 'google/gemini-3.0-pro', name: 'Gemini 3.0 Pro', inputCost: 1.25, outputCost: 5.0 },
 ];
 const NEWSPAPERS = [
-    { key: 'agri', label: '日本農業新聞' },
-    { key: 'nikkei', label: '日本経済新聞' },
-    { key: 'mj', label: '日経MJ' },
-    { key: 'commercial', label: '商業施設新聞' }
+    { key: 'agri', label: '日本農業新聞', shortLabel: '農業' },
+    { key: 'nikkei', label: '日本経済新聞', shortLabel: '日経' },
+    { key: 'mj', label: '日経MJ', shortLabel: 'MJ' },
+    { key: 'commercial', label: '商業施設新聞', shortLabel: '商業' }
 ];
 
 const PDFClipperApp = () => {
@@ -89,13 +92,69 @@ const PDFClipperApp = () => {
         if (!window.pdfjsLib) return;
         const newFiles = [];
         for (const file of Array.from(uploadedFiles)) {
+            if (file.type !== 'application/pdf') continue;
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await window.pdfjsLib.getDocument(arrayBuffer).promise;
             newFiles.push({ name: file.name, data: arrayBuffer, pdf, pageCount: pdf.numPages });
         }
+        if (newFiles.length === 0) return;
         setFiles(prev => [...prev, ...newFiles]);
         if (selectedFileIndex === null && newFiles.length > 0) setSelectedFileIndex(files.length);
     };
+
+    // ドラッグ＆ドロップハンドラ
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const droppedFiles = e.dataTransfer.files;
+        if (droppedFiles.length > 0) {
+            handleFileUpload(droppedFiles);
+        }
+    };
+
+    // クリップボードから貼り付け (Ctrl+V)
+    const handlePaste = async (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (const item of items) {
+            if (item.type === 'application/pdf') {
+                const file = item.getAsFile();
+                if (file) await handleFileUpload([file]);
+            }
+        }
+    };
+
+    // クリップボードから貼り付けボタン用
+    const handlePasteFromClipboard = async () => {
+        try {
+            const clipboardItems = await navigator.clipboard.read();
+            for (const item of clipboardItems) {
+                if (item.types.includes('application/pdf')) {
+                    const blob = await item.getType('application/pdf');
+                    const file = new File([blob], 'pasted.pdf', { type: 'application/pdf' });
+                    await handleFileUpload([file]);
+                }
+            }
+        } catch (err) {
+            alert('PDFの貼り付けに対応していないか、クリップボードにPDFがありません。');
+        }
+    };
+
+    // Ctrl+Vイベントリスナー
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+                handlePaste(e);
+            }
+        };
+        window.addEventListener('paste', handlePaste);
+        return () => window.removeEventListener('paste', handlePaste);
+    }, []);
 
     const renderPage = useCallback(async () => {
         if (selectedFileIndex === null || !files[selectedFileIndex] || !canvasRef.current) return;
@@ -354,6 +413,7 @@ const PDFClipperApp = () => {
                 <div className="flex items-center gap-2 text-blue-600"><Scissors size={24} /> <h1 className="font-extrabold text-xl tracking-tight">PDF Clipper</h1></div>
                 <div className="flex gap-2">
                     <button onClick={() => setSettingsOpen(true)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-all"><Settings size={20} /></button>
+                    <button onClick={handlePasteFromClipboard} className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-200 transition-all active:scale-95"><Clipboard size={16} /><span>貼り付け</span></button>
                     <label className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-bold cursor-pointer hover:bg-blue-700 shadow-md transition-all active:scale-95">
                         <Upload size={16} /><span>PDF追加</span>
                         <input type="file" multiple accept="application/pdf" className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
@@ -368,7 +428,7 @@ const PDFClipperApp = () => {
                             <thead><tr><th></th>{[0, 1, 2, 3, 4].map(i => <th key={i} className="pb-1">{formatShortDate(new Date(Date.now() - i * 86400000))}</th>)}</tr></thead>
                             <tbody>{NEWSPAPERS.map(np => (
                                 <tr key={np.key}>
-                                    <td className="font-bold py-1">{np.label.substring(0, 2)}</td>
+                                    <td className="font-bold py-1">{np.shortLabel}</td>
                                     {[0, 1, 2, 3, 4].map(i => {
                                         const d = new Date(Date.now() - i * 86400000);
                                         const count = matrixCounts[formatDateKey(d)]?.[np.key] || 0;
@@ -403,7 +463,7 @@ const PDFClipperApp = () => {
                             <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))} className="hover:text-blue-600 transition-colors"><Plus size={16} /></button>
                         </div>
                     </div>
-                    <div ref={containerRef} className="flex-1 overflow-auto p-8 flex justify-center no-scrollbar">
+                    <div ref={containerRef} className="flex-1 overflow-auto p-8 flex justify-center no-scrollbar" onDragOver={handleDragOver} onDrop={handleDrop}>
                         {selectedFileIndex !== null && (
                             <div className="relative bg-white shadow-2xl mx-auto self-start ring-1 ring-black/5">
                                 <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} className={mode !== 'view' ? 'cursor-crosshair' : 'cursor-default'} />
