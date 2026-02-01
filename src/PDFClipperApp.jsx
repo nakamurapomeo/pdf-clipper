@@ -81,6 +81,7 @@ const PDFClipperApp = () => {
     const [startPos, setStartPos] = useState({ x: 0, y: 0 });
     const [pageThumbnails, setPageThumbnails] = useState([]);
     const [draggedClipId, setDraggedClipId] = useState(null);
+    const [editingClipId, setEditingClipId] = useState(null);
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -217,9 +218,56 @@ const PDFClipperApp = () => {
         return { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
     };
 
+    // リサイズハンドルの判定（四隅と四辺）
+    const getResizeHandle = (pos, rect) => {
+        const threshold = 0.02; // 2%の範囲でハンドルを検出
+        const inX = pos.x >= rect.x - threshold && pos.x <= rect.x + rect.w + threshold;
+        const inY = pos.y >= rect.y - threshold && pos.y <= rect.y + rect.h + threshold;
+        if (!inX || !inY) return null;
+
+        const nearLeft = Math.abs(pos.x - rect.x) < threshold;
+        const nearRight = Math.abs(pos.x - (rect.x + rect.w)) < threshold;
+        const nearTop = Math.abs(pos.y - rect.y) < threshold;
+        const nearBottom = Math.abs(pos.y - (rect.y + rect.h)) < threshold;
+
+        if (nearTop && nearLeft) return 'nw';
+        if (nearTop && nearRight) return 'ne';
+        if (nearBottom && nearLeft) return 'sw';
+        if (nearBottom && nearRight) return 'se';
+        if (nearTop) return 'n';
+        if (nearBottom) return 's';
+        if (nearLeft) return 'w';
+        if (nearRight) return 'e';
+        return null;
+    };
+
     const handleMouseDown = (e) => {
         if (mode === 'view') return;
         const pos = getMousePos(e);
+
+        // 既存の切り抜き範囲のリサイズ判定
+        if (cropRect.w > 0 && mode === 'crop') {
+            const handle = getResizeHandle(pos, cropRect);
+            if (handle) {
+                setInteractionState({ type: 'resize', target: 'crop', handle });
+                setStartPos(pos);
+                return;
+            }
+        }
+
+        // 既存の白塗りのリサイズ判定
+        if (mode === 'mask') {
+            for (let i = masks.length - 1; i >= 0; i--) {
+                const handle = getResizeHandle(pos, masks[i]);
+                if (handle) {
+                    setInteractionState({ type: 'resize', target: 'mask', index: i, handle });
+                    setStartPos(pos);
+                    return;
+                }
+            }
+        }
+
+        // 新規作成
         setStartPos(pos);
         if (mode === 'mask') {
             const newMask = { x: pos.x, y: pos.y, w: 0, h: 0 };
@@ -234,17 +282,38 @@ const PDFClipperApp = () => {
     const handleMouseMove = (e) => {
         if (interactionState.type === 'none') return;
         const pos = getMousePos(e);
-        const rect = { x: Math.min(startPos.x, pos.x), y: Math.min(startPos.y, pos.y), w: Math.abs(pos.x - startPos.x), h: Math.abs(pos.y - startPos.y) };
-        if (interactionState.target === 'mask') {
-            const newMasks = [...masks];
-            newMasks[interactionState.index] = rect;
-            setMasks(newMasks);
+
+        if (interactionState.type === 'resize') {
+            const handle = interactionState.handle;
+            const updateRect = (rect) => {
+                let { x, y, w, h } = rect;
+                if (handle.includes('w')) { w = (x + w) - pos.x; x = pos.x; }
+                if (handle.includes('e')) { w = pos.x - x; }
+                if (handle.includes('n')) { h = (y + h) - pos.y; y = pos.y; }
+                if (handle.includes('s')) { h = pos.y - y; }
+                return { x, y, w: Math.max(0.01, w), h: Math.max(0.01, h) };
+            };
+
+            if (interactionState.target === 'crop') {
+                setCropRect(updateRect(cropRect));
+            } else {
+                const newMasks = [...masks];
+                newMasks[interactionState.index] = updateRect(masks[interactionState.index]);
+                setMasks(newMasks);
+            }
         } else {
-            setCropRect(rect);
+            const rect = { x: Math.min(startPos.x, pos.x), y: Math.min(startPos.y, pos.y), w: Math.abs(pos.x - startPos.x), h: Math.abs(pos.y - startPos.y) };
+            if (interactionState.target === 'mask') {
+                const newMasks = [...masks];
+                newMasks[interactionState.index] = rect;
+                setMasks(newMasks);
+            } else {
+                setCropRect(rect);
+            }
         }
     };
 
-    const handleMouseUp = () => setInteractionState({ type: 'none', target: null, index: null });
+    const handleMouseUp = () => setInteractionState({ type: 'none', target: null, index: null, handle: null });
 
     // 記事数カウンターに基づく次の日付・新聞を取得
     const getNextDateNewspaper = () => {
@@ -608,9 +677,9 @@ const PDFClipperApp = () => {
                     <div className="flex-1 p-3 space-y-4">
                         {clips.map((c, idx) => (
                             <div key={c.id} draggable onDragStart={() => setDraggedClipId(c.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { if (e.dataTransfer.files.length > 0) { handleFileUpload(e.dataTransfer.files); return; } if (draggedClipId && draggedClipId !== c.id) { const fromIdx = clips.findIndex(x => x.id === draggedClipId); const toIdx = idx; const newClips = [...clips]; const [moved] = newClips.splice(fromIdx, 1); newClips.splice(toIdx, 0, moved); setClips(newClips); } setDraggedClipId(null); }} className={`p-3 border rounded-xl bg-white shadow-sm space-y-3 hover:shadow-md transition-shadow ring-1 ring-black/5 cursor-grab ${draggedClipId === c.id ? 'opacity-50' : ''}`}>
-                                <div className="relative aspect-video bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center">
+                                <div className="relative aspect-video bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center cursor-pointer" onClick={() => setEditingClipId(c.id)}>
                                     <img src={c.dataUrl} className="max-w-full max-h-full object-contain" alt="clip" />
-                                    <button onClick={() => setClips(clips.filter(x => x.id !== c.id))} className="absolute top-1 right-1 p-1 bg-white/80 rounded-full text-red-500 hover:bg-red-50 shadow-sm"><X size={14} /></button>
+                                    <button onClick={(e) => { e.stopPropagation(); setClips(clips.filter(x => x.id !== c.id)); }} className="absolute top-1 right-1 p-1 bg-white/80 rounded-full text-red-500 hover:bg-red-50 shadow-sm"><X size={14} /></button>
                                 </div>
                                 <div className="flex gap-2">
                                     <input value={c.title} onChange={(e) => setClips(clips.map(x => x.id === c.id ? { ...x, title: e.target.value } : x))} className="flex-1 text-xs border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-blue-100 outline-none" placeholder="記事タイトル..." />
@@ -660,6 +729,52 @@ const PDFClipperApp = () => {
                     </div>
                 </div>
             )}
+            {editingClipId && (() => {
+                const clip = clips.find(c => c.id === editingClipId);
+                if (!clip) return null;
+                return (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 z-50" onClick={() => setEditingClipId(null)}>
+                        <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                            <div className="p-4 border-b flex justify-between items-center">
+                                <h3 className="font-bold text-lg">クリップ編集</h3>
+                                <button onClick={() => setEditingClipId(null)} className="p-2 hover:bg-gray-100 rounded-full"><X size={20} /></button>
+                            </div>
+                            <div className="p-6 flex flex-col md:flex-row gap-6">
+                                <div className="flex-1 bg-gray-100 rounded-xl p-4 flex items-center justify-center">
+                                    <img src={clip.dataUrl} className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-lg" alt="clip" />
+                                </div>
+                                <div className="w-full md:w-72 space-y-4">
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">タイトル</label>
+                                        <input value={clip.title} onChange={(e) => setClips(clips.map(x => x.id === clip.id ? { ...x, title: e.target.value } : x))} className="w-full text-sm border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-100" placeholder="記事タイトル..." />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">日付</label>
+                                        <select value={clip.date || formatDateKey(new Date())} onChange={(e) => setClips(clips.map(x => x.id === clip.id ? { ...x, date: e.target.value } : x))} className="w-full text-sm border rounded-lg px-3 py-2 outline-none bg-white">
+                                            {[0, 1, 2, 3, 4].map(i => { const d = new Date(Date.now() - i * 86400000); const key = formatDateKey(d); return <option key={key} value={key}>{formatShortDate(d)}</option>; })}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">新聞</label>
+                                        <select value={clip.newspaper || 'agri'} onChange={(e) => setClips(clips.map(x => x.id === clip.id ? { ...x, newspaper: e.target.value } : x))} className="w-full text-sm border rounded-lg px-3 py-2 outline-none bg-white">
+                                            {NEWSPAPERS.map(np => <option key={np.key} value={np.key}>{np.label}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 block mb-1">サイズ: {clip.scalePercent}%</label>
+                                        <input type="range" min="10" max="100" value={clip.scalePercent} onChange={(e) => setClips(clips.map(x => x.id === clip.id ? { ...x, scalePercent: parseInt(e.target.value) } : x))} className="w-full h-2 bg-gray-200 appearance-none rounded-full cursor-pointer accent-blue-500" />
+                                    </div>
+                                    <button onClick={() => analyzeTitleWithAI(clip.id)} className="w-full py-2 bg-purple-600 text-white rounded-lg text-sm font-bold hover:bg-purple-700 transition-all flex items-center justify-center gap-2">
+                                        {clip.isAnalyzing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                                        AI解析
+                                    </button>
+                                    <button onClick={() => { setClips(clips.filter(x => x.id !== clip.id)); setEditingClipId(null); }} className="w-full py-2 bg-red-500 text-white rounded-lg text-sm font-bold hover:bg-red-600 transition-all">削除</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 };
