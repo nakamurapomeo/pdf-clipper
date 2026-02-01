@@ -34,18 +34,24 @@ const copyToClipboardFallback = (text) => {
 const HANDLE_SIZE_PX = 10;
 const MIN_RECT_SIZE = 0.01;
 
-// OpenRouter モデル定義
+// OpenRouter モデル定義 (コストは概算 $/1M output)
 const AI_MODELS = [
-    { id: 'google/gemini-3-flash-preview', name: 'Gemini 3.0 Flash' },
-    { id: 'google/gemini-3-pro-preview', name: 'Gemini 3.0 Pro' },
-    { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-    { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-    { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash' },
+    { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', inputCost: 0.1, outputCost: 0.4 },
+    { id: 'google/gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash', inputCost: 0.1, outputCost: 0.4 },
+    { id: 'google/gemini-2.5-pro-preview', name: 'Gemini 2.5 Pro', inputCost: 1.25, outputCost: 5.0 },
+];
+// 新聞定義（順序変更: 農業 -> 日経 -> MJ -> 商業）
+const NEWSPAPERS = [
+    { key: 'agri', label: '日本農業新聞' },
+    { key: 'nikkei', label: '日本経済新聞' },
+    { key: 'mj', label: '日経MJ' },
+    { key: 'commercial', label: '商業施設新聞' }
 ];
 
 const PDFClipperApp = () => {
     const pdfJsLoaded = useScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
     const pdfLibLoaded = useScript('https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js');
+    const jszipLoaded = useScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
 
     const [files, setFiles] = useState([]);
     const [selectedFileIndex, setSelectedFileIndex] = useState(null);
@@ -67,6 +73,9 @@ const PDFClipperApp = () => {
     const [aiResult, setAiResult] = useState('');
     const [isAiLoading, setIsAiLoading] = useState(false);
     const [editingClipId, setEditingClipId] = useState(null);
+    const [totalCost, setTotalCost] = useState(0);
+    const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+    const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
 
     // 設定関連State
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -75,6 +84,14 @@ const PDFClipperApp = () => {
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
+    // コンテナサイズ監視用
+    useEffect(() => {
+        if (!containerRef.current) return;
+        const observer = new ResizeObserver(() => renderPage());
+        observer.observe(containerRef.current);
+        return () => observer.disconnect();
+    }, [containerRef.current]);
+
     const [interactionState, setInteractionState] = useState({ type: 'none', target: null, index: null, handle: null });
     const [startPos, setStartPos] = useState({ x: 0, y: 0 });
     const [initialRect, setInitialRect] = useState(null);
@@ -137,8 +154,21 @@ const PDFClipperApp = () => {
         const page = await file.pdf.getPage(currentPage);
         const viewport = page.getViewport({ scale: 1.0, rotation: 0 });
         const containerWidth = containerRef.current ? containerRef.current.clientWidth - 40 : 800;
-        const baseScale = containerWidth / viewport.width;
-        const finalScale = baseScale * zoomLevel;
+        const containerHeight = containerRef.current ? containerRef.current.clientHeight - 40 : 600;
+
+        // Fit Page Logic (初期表示やViewモード時)
+        let finalScale = 1.0;
+        if (zoomLevel === 1.0) {
+            const scaleW = containerWidth / viewport.width;
+            const scaleH = containerHeight / viewport.height;
+            finalScale = Math.min(scaleW, scaleH);
+            // あまりに小さくなりすぎないように制限
+            if (finalScale < 0.1) finalScale = 0.1;
+        } else {
+            const baseScale = containerWidth / viewport.width;
+            finalScale = baseScale * zoomLevel;
+        }
+
         const scaledViewport = page.getViewport({ scale: finalScale, rotation: 0 });
         const rad = (rotation * Math.PI) / 180;
         const sin = Math.abs(Math.sin(rad));
@@ -400,6 +430,18 @@ const PDFClipperApp = () => {
                 throw new Error(errData.error?.message || `API Error: ${response.status}`);
             }
             const data = await response.json();
+
+            // コスト計算
+            if (data.usage) {
+                const modelInfo = AI_MODELS.find(m => m.id === selectedModel);
+                if (modelInfo) {
+                    const inputTokens = data.usage.prompt_tokens || 0;
+                    const outputTokens = data.usage.completion_tokens || 0;
+                    const cost = (inputTokens * modelInfo.inputCost + outputTokens * modelInfo.outputCost) / 1000000;
+                    setTotalCost(prev => prev + cost);
+                }
+            }
+
             let extractedText = data.choices?.[0]?.message?.content?.trim() || "";
 
             // フォールバック: 文字が読み取れなかった場合は画像解析でタイトルを生成
@@ -420,6 +462,16 @@ const PDFClipperApp = () => {
                 });
                 if (fallbackResponse.ok) {
                     const fallbackData = await fallbackResponse.json();
+                    // コスト計算（フォールバック）
+                    if (fallbackData.usage) {
+                        const modelInfo = AI_MODELS.find(m => m.id === selectedModel);
+                        if (modelInfo) {
+                            const inputTokens = fallbackData.usage.prompt_tokens || 0;
+                            const outputTokens = fallbackData.usage.completion_tokens || 0;
+                            const cost = (inputTokens * modelInfo.inputCost + outputTokens * modelInfo.outputCost) / 1000000;
+                            setTotalCost(prev => prev + cost);
+                        }
+                    }
                     extractedText = fallbackData.choices?.[0]?.message?.content?.trim() || "タイトル取得失敗";
                 }
             }
@@ -460,9 +512,7 @@ const PDFClipperApp = () => {
     const copyAndOpenCybozu = () => {
         const todayStr = formatShortDate(new Date());
 
-        // 過去（昨日以前）にカウントがあるかチェック
         let hasPastCounts = false;
-        // 今日(0)〜4日前(4)をチェック、ただし今日は除外して過去判定
         for (let i = 1; i < 5; i++) {
             const d = new Date();
             d.setDate(d.getDate() - i);
@@ -475,20 +525,11 @@ const PDFClipperApp = () => {
             }
         }
 
-        const newspapers = [
-            { key: 'nikkei', label: '日本経済新聞' },
-            { key: 'agri', label: '日本農業新聞' },
-            { key: 'mj', label: '日経MJ' },
-            { key: 'commercial', label: '商業施設新聞' }
-        ];
-
         let newsText = `${todayStr}分\n\n`;
 
-        newspapers.forEach(np => {
+        NEWSPAPERS.forEach(np => {
             newsText += `■${np.label}\n`;
-
             const dots = [];
-            // 4日前から今日までループ（古い順）
             for (let i = 4; i >= 0; i--) {
                 const date = new Date();
                 date.setDate(date.getDate() - i);
@@ -504,16 +545,7 @@ const PDFClipperApp = () => {
                     }
                 }
             }
-
-            if (dots.length > 0) {
-                newsText += dots.join('\n') + '\n';
-            } else {
-                // カウントが0でもヘッダーの下に・を表示するか？
-                // ユーザー要望「・の数を増やしてほしい」 -> 0ならなしか、デフォルト1個か。
-                // 現在の実装に合わせてデフォルトは出力しない（ヘッダーのみ）、もしくは空行。
-                // 既存: \n・\n でした。
-                // ここでは何も出さないと空間がなくなるので、空行を入れます。
-            }
+            if (dots.length > 0) newsText += dots.join('\n') + '\n';
             newsText += '\n';
         });
 
@@ -523,12 +555,12 @@ const PDFClipperApp = () => {
         window.open('https://op7oo.cybozu.com/o/ag.cgi?page=MyFolderMessageView&mid=455345&mdbid=10', '_blank');
     };
 
-    const createPdfBlob = async () => {
-        if (!window.PDFLib || clips.length === 0) return null;
+    const createPdfBlob = async (targetClips = clips) => {
+        if (!window.PDFLib || targetClips.length === 0) return null;
         const { PDFDocument } = window.PDFLib;
         const doc = await PDFDocument.create();
         const A4_WIDTH = 595.28, A4_HEIGHT = 841.89;
-        for (const clip of clips) {
+        for (const clip of targetClips) {
             const image = await doc.embedJpg(clip.dataUrl);
             const { width: imgW, height: imgH } = image.scale(1.0);
             const isLandscape = imgW > imgH;
@@ -553,6 +585,50 @@ const PDFClipperApp = () => {
         link.href = URL.createObjectURL(blob);
         const fileName = outputFileName.trim() || 'merged_document';
         link.download = fileName.toLowerCase().endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+        link.click();
+    };
+
+    const downloadSplitPDFs = async () => {
+        if (!window.JSZip || clips.length === 0) return;
+        const zip = new window.JSZip();
+        let clipIndex = 0;
+
+        // 日付: 古い順 (4日前 -> 今日)
+        for (let i = 4; i >= 0; i--) {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
+            const dKey = formatDateKey(date);
+            const dateStr = formatDate(date); // YYYY.MM.DD
+
+            // 新聞順
+            let dateClips = [];
+            for (const np of NEWSPAPERS) {
+                const count = matrixCounts[dKey]?.[np.key] || 0;
+                if (count > 0) {
+                    // クリップリストから必要数分取得
+                    const slice = clips.slice(clipIndex, clipIndex + count);
+                    dateClips = [...dateClips, ...slice];
+                    clipIndex += count;
+                }
+            }
+
+            if (dateClips.length > 0) {
+                const blob = await createPdfBlob(dateClips);
+                if (blob) zip.file(`${dateStr}.pdf`, blob);
+            }
+        }
+
+        // 余ったクリップがあれば「その他」に入れる
+        if (clipIndex < clips.length) {
+            const extraClips = clips.slice(clipIndex);
+            const blob = await createPdfBlob(extraClips);
+            if (blob) zip.file(`others_${formatDate(new Date())}.pdf`, blob);
+        }
+
+        const content = await zip.generateAsync({ type: "blob" });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = `split_pdfs_${formatDate(new Date())}.zip`;
         link.click();
     };
 
@@ -611,8 +687,11 @@ const PDFClipperApp = () => {
                         <button onClick={previewPDF} disabled={clips.length === 0} className={`flex items-center gap-2 px-4 py-2 rounded text-blue-600 border border-blue-600 font-bold transition ${clips.length > 0 ? 'hover:bg-blue-50' : 'opacity-50 cursor-not-allowed'}`} title="プレビュー">
                             <Eye className="w-4 h-4" /><span className="hidden sm:inline">プレビュー</span>
                         </button>
+                        <button onClick={downloadSplitPDFs} disabled={clips.length === 0} className={`flex items-center gap-2 px-4 py-2 rounded text-white font-bold transition ${clips.length > 0 ? 'bg-teal-600 hover:bg-teal-700' : 'bg-gray-400 cursor-not-allowed'}`} title="日付ごとに分割してダウンロード">
+                            <Download className="w-4 h-4" />分割DL
+                        </button>
                         <button onClick={downloadPDF} disabled={clips.length === 0} className={`flex items-center gap-2 px-4 py-2 rounded text-white font-bold transition ${clips.length > 0 ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'}`}>
-                            <Download className="w-4 h-4" />PDF作成 ({clips.length})
+                            <FileText className="w-4 h-4" />一括PDF
                         </button>
                     </div>
                 </div>
@@ -620,286 +699,299 @@ const PDFClipperApp = () => {
 
             <div className="flex flex-1 overflow-hidden">
                 {/* Left Sidebar */}
-                <div className="w-64 bg-white border-r overflow-y-auto flex flex-col flex-shrink-0 z-10">
-                    {/* Matrix Counter */}
-                    <div className="p-2 bg-gray-50 border-b">
-                        <div className="text-xs font-bold text-gray-500 mb-2 px-1">記事数カウンター</div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-center text-xs border-collapse">
-                                <thead>
-                                    <tr>
-                                        <th className="p-1 text-left font-normal text-gray-400 w-16"></th>
-                                        {[0, 1, 2, 3, 4].map(daysAgo => {
-                                            const d = new Date();
-                                            d.setDate(d.getDate() - daysAgo);
-                                            const isToday = daysAgo === 0;
-                                            return (
-                                                <th key={daysAgo} className={`p-1 font-normal border-b min-w-[30px] ${isToday ? 'text-blue-600 font-bold' : 'text-gray-500'}`}>
-                                                    {formatShortDate(d)}
-                                                </th>
-                                            );
-                                        })}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {[
-                                        { key: 'nikkei', label: '日経' },
-                                        { key: 'agri', label: '農業' },
-                                        { key: 'mj', label: 'MJ' },
-                                        { key: 'commercial', label: '商業' }
-                                    ].map(np => (
-                                        <tr key={np.key} className="border-b last:border-0 bg-white">
-                                            <td className="p-1 text-left font-bold text-gray-600 whitespace-nowrap">{np.label}</td>
+                <div className="flex flex-1 overflow-hidden relative">
+                    {/* Left Sidebar */}
+                    <div className={`${leftSidebarOpen ? 'w-64 border-r' : 'w-0 border-none'} bg-white overflow-y-auto flex flex-col flex-shrink-0 transition-all duration-300 z-10`}>
+                        {/* Matrix Counter */}
+                        <div className="p-2 bg-gray-50 border-b">
+                            <div className="text-xs font-bold text-gray-500 mb-2 px-1">記事数カウンター</div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-center text-xs border-collapse">
+                                    <thead>
+                                        <tr>
+                                            <th className="p-1 text-left font-normal text-gray-400 w-16"></th>
                                             {[0, 1, 2, 3, 4].map(daysAgo => {
                                                 const d = new Date();
                                                 d.setDate(d.getDate() - daysAgo);
-                                                const dKey = formatDateKey(d);
-                                                const count = matrixCounts[dKey]?.[np.key] || 0;
+                                                const isToday = daysAgo === 0;
                                                 return (
-                                                    <td
-                                                        key={daysAgo}
-                                                        className={`p-1 cursor-pointer select-none hover:bg-blue-50 transition border-l border-gray-100 ${count > 0 ? 'text-blue-600 font-bold' : 'text-gray-300'}`}
-                                                        onClick={() => updateMatrixCount(d, np.key, 1)}
-                                                        onContextMenu={(e) => { e.preventDefault(); updateMatrixCount(d, np.key, -1); }}
-                                                    >
-                                                        {count > 0 ? count : '-'}
-                                                    </td>
+                                                    <th key={daysAgo} className={`p-1 font-normal border-b min-w-[30px] ${isToday ? 'text-blue-600 font-bold' : 'text-gray-500'}`}>
+                                                        {formatShortDate(d)}
+                                                    </th>
                                                 );
                                             })}
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div className="text-[10px] text-gray-400 mt-1 text-right px-1">左=増 / 右=減</div>
-                    </div>
-
-                    <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500">アップロード済みファイル</div>
-                    <div className="flex-1 p-2 space-y-2">
-                        {files.map((file, idx) => (
-                            <div key={idx} onClick={() => selectFile(idx)} className={`p-3 rounded cursor-pointer flex items-center gap-3 transition ${selectedFileIndex === idx ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50 border border-transparent'}`}>
-                                <FileText className={`w-5 h-5 ${selectedFileIndex === idx ? 'text-blue-600' : 'text-gray-400'}`} />
-                                <div className="overflow-hidden"><div className="text-sm font-medium truncate">{file.name}</div><div className="text-xs text-gray-500">{file.pageCount} pages</div></div>
+                                    </thead>
+                                    <tbody>
+                                        {NEWSPAPERS.map(np => (
+                                            <tr key={np.key} className="border-b last:border-0 bg-white">
+                                                <td className="p-1 text-left font-bold text-gray-600 whitespace-nowrap">{np.label.replace('日本', '').replace('新聞', '').replace('施設', '')}</td>
+                                                {[0, 1, 2, 3, 4].map(daysAgo => {
+                                                    const d = new Date();
+                                                    d.setDate(d.getDate() - daysAgo);
+                                                    const dKey = formatDateKey(d);
+                                                    const count = matrixCounts[dKey]?.[np.key] || 0;
+                                                    return (
+                                                        <td
+                                                            key={daysAgo}
+                                                            className={`p-1 cursor-pointer select-none hover:bg-blue-50 transition border-l border-gray-100 ${count > 0 ? 'text-blue-600 font-bold' : 'text-gray-300'}`}
+                                                            onClick={() => updateMatrixCount(d, np.key, 1)}
+                                                            onContextMenu={(e) => { e.preventDefault(); updateMatrixCount(d, np.key, -1); }}
+                                                        >
+                                                            {count > 0 ? count : '-'}
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
-                        ))}
-                        {files.length === 0 && <div className="text-center p-8 text-gray-400 text-sm">PDFをここにドラッグ<br />または貼り付け(Ctrl+V)</div>}
-                    </div>
-                </div>
+                            <div className="text-[10px] text-gray-400 mt-1 text-right px-1">左=増 / 右=減</div>
+                        </div>
 
-                {/* Main Editor */}
-                <div className="flex-1 flex flex-col bg-gray-100 relative min-w-0">
-                    {/* Toolbar */}
-                    <div className="h-14 bg-white border-b flex items-center justify-between px-4 gap-4 z-10">
-                        <div className="flex items-center gap-1">
-                            <button onClick={() => setMode(mode === 'crop' ? 'view' : 'crop')} className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm transition ${mode === 'crop' ? 'bg-green-100 text-green-700 font-bold ring-2 ring-green-500 ring-offset-1' : 'hover:bg-gray-100 text-gray-600'}`}>
-                                <Scissors className="w-4 h-4" /> 切り抜き枠
-                            </button>
-                            <button onClick={() => setMode(mode === 'mask' ? 'view' : 'mask')} className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm transition ${mode === 'mask' ? 'bg-red-100 text-red-700 font-bold ring-2 ring-red-500 ring-offset-1' : 'hover:bg-gray-100 text-gray-600'}`}>
-                                <Eraser className="w-4 h-4" /> 白塗り
-                            </button>
-                            <div className="w-px h-6 bg-gray-300 mx-2"></div>
-                            <div className="flex items-center gap-1 bg-gray-100 p-1 rounded">
-                                <button onClick={() => setRotation(r => Number((r - 1).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="-1°"><ChevronLeft className="w-4 h-4 text-gray-600" /></button>
-                                <button onClick={() => setRotation(r => Number((r - 0.1).toFixed(1)))} className="px-1 py-0.5 hover:bg-gray-200 rounded text-[10px] font-bold text-gray-600" title="-0.1°">-0.1</button>
-                                <div className="w-24 px-2 flex flex-col items-center">
-                                    <span className="text-[10px] text-gray-500">{rotation.toFixed(1)}°</span>
-                                    <input type="range" min="-180" max="180" step="0.1" value={rotation} onChange={(e) => setRotation(parseFloat(e.target.value))} className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer" />
+                        <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500">アップロード済みファイル</div>
+                        <div className="flex-1 p-2 space-y-2">
+                            {files.map((file, idx) => (
+                                <div key={idx} onClick={() => selectFile(idx)} className={`p-3 rounded cursor-pointer flex items-center gap-3 transition ${selectedFileIndex === idx ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50 border border-transparent'}`}>
+                                    <FileText className={`w-5 h-5 ${selectedFileIndex === idx ? 'text-blue-600' : 'text-gray-400'}`} />
+                                    <div className="overflow-hidden"><div className="text-sm font-medium truncate">{file.name}</div><div className="text-xs text-gray-500">{file.pageCount} pages</div></div>
                                 </div>
-                                <button onClick={() => setRotation(r => Number((r + 0.1).toFixed(1)))} className="px-1 py-0.5 hover:bg-gray-200 rounded text-[10px] font-bold text-gray-600" title="+0.1°">+0.1</button>
-                                <button onClick={() => setRotation(r => Number((r + 1).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="+1°"><ChevronRight className="w-4 h-4 text-gray-600" /></button>
-                                <div className="w-px h-4 bg-gray-300 mx-1"></div>
-                                <button onClick={() => setRotation(r => Number((r + 90).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="+90°"><RefreshCw className="w-4 h-4 text-gray-600" /></button>
-                            </div>
-                            <div className="flex items-center gap-1 ml-2 bg-gray-100 rounded px-2">
-                                <button onClick={() => setZoomLevel(z => Math.max(z - 0.05, 0.5))} className="p-1 hover:text-blue-600"><ZoomOut className="w-4 h-4" /></button>
-                                <span className="text-xs w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
-                                <button onClick={() => setZoomLevel(z => Math.min(z + 0.05, 3.0))} className="p-1 hover:text-blue-600"><ZoomIn className="w-4 h-4" /></button>
-                            </div>
-                        </div>
-                        {selectedFileIndex !== null && (
-                            <div className="flex items-center gap-2 bg-gray-100 px-2 py-1 rounded">
-                                <button onClick={() => changePage(-1)} disabled={currentPage <= 1} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm disabled:opacity-50 text-sm">&lt;</button>
-                                <span className="text-xs font-medium whitespace-nowrap px-1">P.{currentPage} / {files[selectedFileIndex].pageCount}</span>
-                                <button onClick={() => changePage(1)} disabled={currentPage >= files[selectedFileIndex].pageCount} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm disabled:opacity-50 text-sm">&gt;</button>
-                            </div>
-                        )}
-                        <div className="flex items-center gap-2">
-                            {editingClipId && <button onClick={cancelEdit} className="px-3 py-1.5 text-gray-600 text-sm hover:bg-gray-100 rounded">キャンセル</button>}
-                            <button onClick={saveClip} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-bold shadow-sm transition ${editingClipId ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}>
-                                {editingClipId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                                {editingClipId ? '更新して保存' : 'リストに追加'}
-                            </button>
+                            ))}
+                            {files.length === 0 && <div className="text-center p-8 text-gray-400 text-sm">PDFをここにドラッグ<br />または貼り付け(Ctrl+V)</div>}
                         </div>
                     </div>
-                    {editingClipId && <div className="bg-orange-100 text-orange-800 text-xs px-4 py-1 text-center font-bold border-b border-orange-200">リストアイテムの再編集中です。</div>}
-                    {/* Canvas */}
-                    <div className="flex-1 overflow-auto p-8 flex items-start relative bg-gray-200/50" ref={containerRef}>
-                        {selectedFileIndex !== null ? (
-                            <div className="relative shadow-lg border border-gray-300 bg-white m-auto">
-                                <canvas ref={canvasRef} className="block" />
-                                <svg className="absolute top-0 left-0 w-full h-full touch-none" style={{ pointerEvents: 'all', cursor: mode === 'view' ? 'default' : (interactionState.type === 'move' ? 'move' : 'default') }} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-                                    {cropRect.w > 0 && cropRect.h > 0 && (
-                                        <>
-                                            <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth={mode === 'crop' ? 2 : 1} strokeDasharray="5,5" style={{ pointerEvents: 'none' }} />
-                                            {mode === 'crop' && <RectHandles x={cropRect.x} y={cropRect.y} w={cropRect.w} h={cropRect.h} color="#22c55e" />}
-                                        </>
-                                    )}
-                                    {masks.map((m, i) => (
-                                        <g key={i}>
-                                            <rect x={`${m.x * 100}%`} y={`${m.y * 100}%`} width={`${m.w * 100}%`} height={`${m.h * 100}%`} fill="rgba(239, 68, 68, 0.5)" stroke="#ef4444" strokeWidth="1" style={{ pointerEvents: 'none' }} />
-                                            {mode === 'mask' && (
-                                                <>
-                                                    <RectHandles x={m.x} y={m.y} w={m.w} h={m.h} color="#ef4444" />
-                                                    <line x1={`${m.x * 100}%`} y1={`${m.y * 100}%`} x2={`${(m.x + m.w) * 100}%`} y2={`${(m.y + m.h) * 100}%`} stroke="#ef4444" strokeWidth="1" />
-                                                    <line x1={`${(m.x + m.w) * 100}%`} y1={`${m.y * 100}%`} x2={`${m.x * 100}%`} y2={`${(m.y + m.h) * 100}%`} stroke="#ef4444" strokeWidth="1" />
-                                                    <g onClick={(e) => { e.stopPropagation(); removeMask(i); }} style={{ cursor: 'pointer', pointerEvents: 'all' }}>
-                                                        <circle cx={`${(m.x + m.w) * 100}%`} cy={`${m.y * 100}%`} r="8" fill="red" />
-                                                        <text x={`${(m.x + m.w) * 100}%`} y={`${m.y * 100}%`} dy="3" dx="-3" fill="white" fontSize="10" fontWeight="bold">×</text>
-                                                    </g>
-                                                </>
-                                            )}
-                                        </g>
-                                    ))}
-                                </svg>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center h-full text-gray-400 m-auto">
-                                <Scissors className="w-16 h-16 mb-4 opacity-20" />
-                                <p>左側のメニューからPDFを選択するか、<br />ファイルをドロップしてください</p>
-                            </div>
-                        )}
-                    </div>
-                </div>
 
-                {/* Right Sidebar */}
-                <div className="w-80 bg-white border-l flex flex-col z-20 shadow-lg flex-shrink-0">
-                    <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500 flex justify-between items-center">
-                        <span>結合リスト</span>
-                        <div className="flex gap-2 items-center">
-                            <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="flex items-center gap-1 bg-purple-100 text-purple-600 px-2 py-1 rounded text-xs hover:bg-purple-200 transition disabled:opacity-50" title="すべてのクリップをAI解析">
-                                <Sparkles className="w-3 h-3" />一括解析
-                            </button>
-                            <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">{clips.length}</span>
-                        </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-3 space-y-6">
-                        {clips.map((clip, idx) => (
-                            <div key={clip.id} className={`group relative border rounded shadow-sm p-2 transition ${editingClipId === clip.id ? 'bg-orange-50 border-orange-300 ring-2 ring-orange-200' : 'bg-gray-50 hover:shadow-md'}`}>
-                                <div className="text-xs text-gray-400 mb-2 flex justify-between items-center">
-                                    <span>#{idx + 1} {clip.aspectRatio > 1 ? '(横)' : '(縦)'}</span>
-                                    <div className="flex gap-1">
-                                        <button onClick={() => editClip(clip)} className="text-blue-400 hover:text-blue-600 p-1 hover:bg-blue-50 rounded" title="再編集"><Edit3 className="w-3.5 h-3.5" /></button>
-                                        <button onClick={() => removeClip(clip.id)} className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 rounded" title="削除"><Trash2 className="w-3.5 h-3.5" /></button>
+                    {/* Main Editor */}
+                    <div className="flex-1 flex flex-col bg-gray-100 relative min-w-0">
+                        {/* Sidebar Toggles */}
+                        <button
+                            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+                            className="absolute top-1/2 left-0 z-20 transform -translate-y-1/2 bg-white border border-gray-300 rounded-r shadow-md p-1 hover:bg-gray-100 text-gray-500"
+                            title={leftSidebarOpen ? "サイドバーを閉じる" : "サイドバーを開く"}
+                        >
+                            {leftSidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+                        </button>
+                        <button
+                            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+                            className="absolute top-1/2 right-0 z-20 transform -translate-y-1/2 bg-white border border-gray-300 rounded-l shadow-md p-1 hover:bg-gray-100 text-gray-500"
+                            title={rightSidebarOpen ? "サイドバーを閉じる" : "サイドバーを開く"}
+                        >
+                            {rightSidebarOpen ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+                        </button>
+                        {/* Toolbar */}
+                        <div className="h-14 bg-white border-b flex items-center justify-between px-4 gap-4 z-10">
+                            <div className="flex items-center gap-1">
+                                <button onClick={() => setMode(mode === 'crop' ? 'view' : 'crop')} className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm transition ${mode === 'crop' ? 'bg-green-100 text-green-700 font-bold ring-2 ring-green-500 ring-offset-1' : 'hover:bg-gray-100 text-gray-600'}`}>
+                                    <Scissors className="w-4 h-4" /> 切り抜き枠
+                                </button>
+                                <button onClick={() => setMode(mode === 'mask' ? 'view' : 'mask')} className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm transition ${mode === 'mask' ? 'bg-red-100 text-red-700 font-bold ring-2 ring-red-500 ring-offset-1' : 'hover:bg-gray-100 text-gray-600'}`}>
+                                    <Eraser className="w-4 h-4" /> 白塗り
+                                </button>
+                                <div className="w-px h-6 bg-gray-300 mx-2"></div>
+                                <div className="flex items-center gap-1 bg-gray-100 p-1 rounded">
+                                    <button onClick={() => setRotation(r => Number((r - 1).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="-1°"><ChevronLeft className="w-4 h-4 text-gray-600" /></button>
+                                    <button onClick={() => setRotation(r => Number((r - 0.1).toFixed(1)))} className="px-1 py-0.5 hover:bg-gray-200 rounded text-[10px] font-bold text-gray-600" title="-0.1°">-0.1</button>
+                                    <div className="w-24 px-2 flex flex-col items-center">
+                                        <span className="text-[10px] text-gray-500">{rotation.toFixed(1)}°</span>
+                                        <input type="range" min="-180" max="180" step="0.1" value={rotation} onChange={(e) => setRotation(parseFloat(e.target.value))} className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer" />
                                     </div>
+                                    <button onClick={() => setRotation(r => Number((r + 0.1).toFixed(1)))} className="px-1 py-0.5 hover:bg-gray-200 rounded text-[10px] font-bold text-gray-600" title="+0.1°">+0.1</button>
+                                    <button onClick={() => setRotation(r => Number((r + 1).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="+1°"><ChevronRight className="w-4 h-4 text-gray-600" /></button>
+                                    <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                                    <button onClick={() => setRotation(r => Number((r + 90).toFixed(1)))} className="p-1 hover:bg-gray-200 rounded" title="+90°"><RefreshCw className="w-4 h-4 text-gray-600" /></button>
                                 </div>
-                                <div className="relative bg-white border overflow-hidden rounded flex items-center justify-center h-32 cursor-pointer hover:opacity-90 mb-2" onClick={() => editClip(clip)}>
-                                    <img src={clip.dataUrl} className="max-w-full max-h-full object-contain" alt="clip" />
-                                    {editingClipId === clip.id && <div className="absolute inset-0 bg-orange-500/10 flex items-center justify-center pointer-events-none"><span className="bg-white/90 text-orange-600 text-xs px-2 py-1 rounded font-bold shadow-sm">編集中</span></div>}
-                                </div>
-                                <div className="mb-2">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <input type="text" className="flex-1 text-xs border rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none" placeholder="記事タイトル" value={clip.title || ''} onChange={(e) => updateClipTitle(clip.id, e.target.value)} />
-                                        <button onClick={() => analyzeTitleWithAI(clip.id)} disabled={clip.isAnalyzing} className="p-1.5 bg-purple-100 text-purple-600 rounded hover:bg-purple-200 disabled:opacity-50" title="AIでタイトル抽出">
-                                            {clip.isAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                                        </button>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2 text-xs text-gray-500">
-                                    <span className="whitespace-nowrap">サイズ: {clip.scalePercent || 100}%</span>
-                                    <input type="range" min="10" max="100" step="5" value={clip.scalePercent || 100} onChange={(e) => updateClipScale(clip.id, e.target.value)} className="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+                                <div className="flex items-center gap-1 ml-2 bg-gray-100 rounded px-2">
+                                    <button onClick={() => setZoomLevel(z => Math.max(z - 0.05, 0.5))} className="p-1 hover:text-blue-600"><ZoomOut className="w-4 h-4" /></button>
+                                    <span className="text-xs w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
+                                    <button onClick={() => setZoomLevel(z => Math.min(z + 0.05, 3.0))} className="p-1 hover:text-blue-600"><ZoomIn className="w-4 h-4" /></button>
                                 </div>
                             </div>
-                        ))}
-                        {clips.length === 0 && <div className="text-center p-6 text-gray-400 text-xs">「リストに追加」を押すと<br />ここに画像が追加されます</div>}
-                    </div>
-                    <div className="p-4 border-t bg-gray-50 space-y-3">
-                        <div className="space-y-2">
+                            {selectedFileIndex !== null && (
+                                <div className="flex items-center gap-2 bg-gray-100 px-2 py-1 rounded">
+                                    <button onClick={() => changePage(-1)} disabled={currentPage <= 1} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm disabled:opacity-50 text-sm">&lt;</button>
+                                    <span className="text-xs font-medium whitespace-nowrap px-1">P.{currentPage} / {files[selectedFileIndex].pageCount}</span>
+                                    <button onClick={() => changePage(1)} disabled={currentPage >= files[selectedFileIndex].pageCount} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm disabled:opacity-50 text-sm">&gt;</button>
+                                </div>
+                            )}
                             <div className="flex items-center gap-2">
-                                <input type="date" value={fileDate.toISOString().split('T')[0]} onChange={(e) => e.target.valueAsDate && setFileDate(e.target.valueAsDate)} className="flex-1 px-2 py-1 text-xs border rounded shadow-sm outline-none" />
+                                {editingClipId && <button onClick={cancelEdit} className="px-3 py-1.5 text-gray-600 text-sm hover:bg-gray-100 rounded">キャンセル</button>}
+                                <button onClick={saveClip} className={`flex items-center gap-2 px-4 py-1.5 rounded text-sm font-bold shadow-sm transition ${editingClipId ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}>
+                                    {editingClipId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                                    {editingClipId ? '更新して保存' : 'リストに追加'}
+                                </button>
                             </div>
-                            <input type="text" value={fileNamePrefix} onChange={(e) => setFileNamePrefix(e.target.value)} className="w-full px-2 py-1 text-xs border rounded shadow-sm outline-none" placeholder="【共有事項】" />
                         </div>
-                        <div className="flex flex-col gap-2">
-                            <button onClick={copyAndOpenCybozu} className="w-full flex items-center justify-center gap-2 py-2.5 rounded text-sm font-bold shadow-sm bg-cyan-600 hover:bg-cyan-700 text-white transition">
-                                <ExternalLink className="w-4 h-4" />Cybozuへ投稿
-                            </button>
-                            <button onClick={downloadPDF} disabled={clips.length === 0} className={`w-full py-2.5 rounded text-sm font-bold shadow-sm transition ${clips.length > 0 ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
-                                PDFをダウンロード
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Settings Modal */}
-            {settingsOpen && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
-                        <div className="flex items-center justify-between p-4 border-b">
-                            <h3 className="font-bold text-gray-700 flex items-center gap-2"><Settings className="w-5 h-5" />設定</h3>
-                            <button onClick={() => setSettingsOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-                        </div>
-                        <div className="p-4 space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">OpenRouter APIキー</label>
-                                <div className="flex items-center gap-2">
-                                    <Key className="w-4 h-4 text-gray-400" />
-                                    <input type="password" value={openRouterApiKey} onChange={(e) => setOpenRouterApiKey(e.target.value)} className="flex-1 px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="sk-or-..." />
+                        {editingClipId && <div className="bg-orange-100 text-orange-800 text-xs px-4 py-1 text-center font-bold border-b border-orange-200">リストアイテムの再編集中です。</div>}
+                        {/* Canvas */}
+                        <div className="flex-1 overflow-auto p-8 flex items-start relative bg-gray-200/50" ref={containerRef}>
+                            {selectedFileIndex !== null ? (
+                                <div className="relative shadow-lg border border-gray-300 bg-white m-auto">
+                                    <canvas ref={canvasRef} className="block" />
+                                    <svg className="absolute top-0 left-0 w-full h-full touch-none" style={{ pointerEvents: 'all', cursor: mode === 'view' ? 'default' : (interactionState.type === 'move' ? 'move' : 'default') }} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+                                        {cropRect.w > 0 && cropRect.h > 0 && (
+                                            <>
+                                                <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth={mode === 'crop' ? 2 : 1} strokeDasharray="5,5" style={{ pointerEvents: 'none' }} />
+                                                {mode === 'crop' && <RectHandles x={cropRect.x} y={cropRect.y} w={cropRect.w} h={cropRect.h} color="#22c55e" />}
+                                            </>
+                                        )}
+                                        {masks.map((m, i) => (
+                                            <g key={i}>
+                                                <rect x={`${m.x * 100}%`} y={`${m.y * 100}%`} width={`${m.w * 100}%`} height={`${m.h * 100}%`} fill="rgba(239, 68, 68, 0.5)" stroke="#ef4444" strokeWidth="1" style={{ pointerEvents: 'none' }} />
+                                                {mode === 'mask' && (
+                                                    <>
+                                                        <RectHandles x={m.x} y={m.y} w={m.w} h={m.h} color="#ef4444" />
+                                                        <line x1={`${m.x * 100}%`} y1={`${m.y * 100}%`} x2={`${(m.x + m.w) * 100}%`} y2={`${(m.y + m.h) * 100}%`} stroke="#ef4444" strokeWidth="1" />
+                                                        <line x1={`${(m.x + m.w) * 100}%`} y1={`${m.y * 100}%`} x2={`${m.x * 100}%`} y2={`${(m.y + m.h) * 100}%`} stroke="#ef4444" strokeWidth="1" />
+                                                        <g onClick={(e) => { e.stopPropagation(); removeMask(i); }} style={{ cursor: 'pointer', pointerEvents: 'all' }}>
+                                                            <circle cx={`${(m.x + m.w) * 100}%`} cy={`${m.y * 100}%`} r="8" fill="red" />
+                                                            <text x={`${(m.x + m.w) * 100}%`} y={`${m.y * 100}%`} dy="3" dx="-3" fill="white" fontSize="10" fontWeight="bold">×</text>
+                                                        </g>
+                                                    </>
+                                                )}
+                                            </g>
+                                        ))}
+                                    </svg>
                                 </div>
-                                <p className="text-xs text-gray-500 mt-1">APIキーはブラウザに保存されます。</p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">AIモデル</label>
-                                <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                                    {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                                </select>
-                            </div>
-                        </div>
-                        <div className="p-4 border-t flex justify-end gap-2">
-                            <button onClick={() => setSettingsOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">キャンセル</button>
-                            <button onClick={saveSettings} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-bold">保存</button>
+                            ) : (
+                                <div className="flex flex-col items-center justify-center h-full text-gray-400 m-auto">
+                                    <Scissors className="w-16 h-16 mb-4 opacity-20" />
+                                    <p>左側のメニューからPDFを選択するか、<br />ファイルをドロップしてください</p>
+                                </div>
+                            )}
                         </div>
                     </div>
-                </div>
-            )}
 
-            {/* Preview Modal */}
-            {previewUrl && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-8">
-                    <div className="bg-white rounded-lg w-full h-full max-w-4xl max-h-full flex flex-col shadow-2xl animate-fade-in">
-                        <div className="flex justify-between items-center p-3 border-b">
-                            <h3 className="font-bold text-gray-700 flex items-center gap-2"><Eye className="w-5 h-5 text-blue-600" />プレビュー</h3>
-                            <button onClick={() => setPreviewUrl(null)} className="p-1 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-500" /></button>
+                    {/* Right Sidebar */}
+                    <div className={`${rightSidebarOpen ? 'w-80 border-l' : 'w-0 border-none'} bg-white flex flex-col z-20 shadow-lg flex-shrink-0 transition-all duration-300`}>
+                        <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500 flex justify-between items-center whitespace-nowrap overflow-hidden">
+                            <span>結合リスト</span>
+                            <div className="flex gap-2 items-center">
+                                <span className="text-[10px] text-gray-400">AICost: ${totalCost.toFixed(4)}</span>
+                                <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="flex items-center gap-1 bg-purple-100 text-purple-600 px-2 py-1 rounded text-xs hover:bg-purple-200 transition disabled:opacity-50" title="すべてのクリップをAI解析">
+                                    <Sparkles className="w-3 h-3" />一括
+                                </button>
+                                <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">{clips.length}</span>
+                            </div>
                         </div>
-                        <div className="flex-1 bg-gray-100 p-2 overflow-hidden">
-                            <iframe src={previewUrl} className="w-full h-full rounded border border-gray-300 bg-white" title="PDF Preview" />
+                        <div className="flex-1 overflow-y-auto p-3 space-y-6">
+                            {clips.map((clip, idx) => (
+                                <div key={clip.id} className={`group relative border rounded shadow-sm p-2 transition ${editingClipId === clip.id ? 'bg-orange-50 border-orange-300 ring-2 ring-orange-200' : 'bg-gray-50 hover:shadow-md'}`}>
+                                    <div className="text-xs text-gray-400 mb-2 flex justify-between items-center">
+                                        <span>#{idx + 1} {clip.aspectRatio > 1 ? '(横)' : '(縦)'}</span>
+                                        <div className="flex gap-1">
+                                            <button onClick={() => editClip(clip)} className="text-blue-400 hover:text-blue-600 p-1 hover:bg-blue-50 rounded" title="再編集"><Edit3 className="w-3.5 h-3.5" /></button>
+                                            <button onClick={() => removeClip(clip.id)} className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 rounded" title="削除"><Trash2 className="w-3.5 h-3.5" /></button>
+                                        </div>
+                                    </div>
+                                    <div className="relative bg-white border overflow-hidden rounded flex items-center justify-center h-32 cursor-pointer hover:opacity-90 mb-2" onClick={() => editClip(clip)}>
+                                        <img src={clip.dataUrl} className="max-w-full max-h-full object-contain" alt="clip" />
+                                        {editingClipId === clip.id && <div className="absolute inset-0 bg-orange-500/10 flex items-center justify-center pointer-events-none"><span className="bg-white/90 text-orange-600 text-xs px-2 py-1 rounded font-bold shadow-sm">編集中</span></div>}
+                                    </div>
+                                    <div className="mb-2">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <input type="text" className="flex-1 text-xs border rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none" placeholder="記事タイトル" value={clip.title || ''} onChange={(e) => updateClipTitle(clip.id, e.target.value)} />
+                                            <button onClick={() => analyzeTitleWithAI(clip.id)} disabled={clip.isAnalyzing} className="p-1.5 bg-purple-100 text-purple-600 rounded hover:bg-purple-200 disabled:opacity-50" title="AIでタイトル抽出">
+                                                {clip.isAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                                        <span className="whitespace-nowrap">サイズ: {clip.scalePercent || 100}%</span>
+                                        <input type="range" min="10" max="100" step="5" value={clip.scalePercent || 100} onChange={(e) => updateClipScale(clip.id, e.target.value)} className="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+                                    </div>
+                                </div>
+                            ))}
+                            {clips.length === 0 && <div className="text-center p-6 text-gray-400 text-xs">「リストに追加」を押すと<br />ここに画像が追加されます</div>}
+                        </div>
+                        <div className="p-4 border-t bg-gray-50 space-y-3">
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <input type="date" value={fileDate.toISOString().split('T')[0]} onChange={(e) => e.target.valueAsDate && setFileDate(e.target.valueAsDate)} className="flex-1 px-2 py-1 text-xs border rounded shadow-sm outline-none" />
+                                </div>
+                                <input type="text" value={fileNamePrefix} onChange={(e) => setFileNamePrefix(e.target.value)} className="w-full px-2 py-1 text-xs border rounded shadow-sm outline-none" placeholder="【共有事項】" />
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                <button onClick={copyAndOpenCybozu} className="w-full flex items-center justify-center gap-2 py-2.5 rounded text-sm font-bold shadow-sm bg-cyan-600 hover:bg-cyan-700 text-white transition">
+                                    <ExternalLink className="w-4 h-4" />Cybozuへ投稿
+                                </button>
+                                <button onClick={downloadPDF} disabled={clips.length === 0} className={`w-full py-2.5 rounded text-sm font-bold shadow-sm transition ${clips.length > 0 ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
+                                    PDFをダウンロード
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
-            )}
 
-            {/* AI Result Modal */}
-            {aiModalOpen && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col max-h-[80vh]">
-                        <div className="flex items-center justify-between p-4 border-b">
-                            <div className="flex items-center gap-2 text-purple-600"><Sparkles className="w-5 h-5" /><h3 className="font-bold">AI解析結果</h3></div>
-                            <button onClick={() => setAiModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-                        </div>
-                        <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
-                            {isAiLoading ? <div className="flex flex-col items-center justify-center py-12 text-gray-500"><Loader2 className="w-8 h-8 animate-spin mb-2 text-purple-500" /><p>AIが画像を解析中...</p></div> : <div className="prose prose-sm max-w-none whitespace-pre-wrap text-sm text-gray-700">{aiResult}</div>}
-                        </div>
-                        <div className="p-4 border-t flex justify-end gap-2">
-                            <button onClick={copyToClipboard} disabled={isAiLoading || !aiResult} className="flex items-center gap-2 px-3 py-2 bg-white border hover:bg-gray-50 text-gray-700 rounded text-sm transition">
-                                {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}{copied ? 'コピーしました' : '結果をコピー'}
-                            </button>
-                            <button onClick={() => setAiModalOpen(false)} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm font-bold transition">閉じる</button>
+                {/* Settings Modal */}
+                {settingsOpen && (
+                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+                            <div className="flex items-center justify-between p-4 border-b">
+                                <h3 className="font-bold text-gray-700 flex items-center gap-2"><Settings className="w-5 h-5" />設定</h3>
+                                <button onClick={() => setSettingsOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                            </div>
+                            <div className="p-4 space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">OpenRouter APIキー</label>
+                                    <div className="flex items-center gap-2">
+                                        <Key className="w-4 h-4 text-gray-400" />
+                                        <input type="password" value={openRouterApiKey} onChange={(e) => setOpenRouterApiKey(e.target.value)} className="flex-1 px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="sk-or-..." />
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-1">APIキーはブラウザに保存されます。</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">AIモデル</label>
+                                    <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                                        {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="p-4 border-t flex justify-end gap-2">
+                                <button onClick={() => setSettingsOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm">キャンセル</button>
+                                <button onClick={saveSettings} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-bold">保存</button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
-    );
+                )}
+
+                {/* Preview Modal */}
+                {previewUrl && (
+                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-8">
+                        <div className="bg-white rounded-lg w-full h-full max-w-4xl max-h-full flex flex-col shadow-2xl animate-fade-in">
+                            <div className="flex justify-between items-center p-3 border-b">
+                                <h3 className="font-bold text-gray-700 flex items-center gap-2"><Eye className="w-5 h-5 text-blue-600" />プレビュー</h3>
+                                <button onClick={() => setPreviewUrl(null)} className="p-1 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-500" /></button>
+                            </div>
+                            <div className="flex-1 bg-gray-100 p-2 overflow-hidden">
+                                <iframe src={previewUrl} className="w-full h-full rounded border border-gray-300 bg-white" title="PDF Preview" />
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* AI Result Modal */}
+                {aiModalOpen && (
+                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col max-h-[80vh]">
+                            <div className="flex items-center justify-between p-4 border-b">
+                                <div className="flex items-center gap-2 text-purple-600"><Sparkles className="w-5 h-5" /><h3 className="font-bold">AI解析結果</h3></div>
+                                <button onClick={() => setAiModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                            </div>
+                            <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
+                                {isAiLoading ? <div className="flex flex-col items-center justify-center py-12 text-gray-500"><Loader2 className="w-8 h-8 animate-spin mb-2 text-purple-500" /><p>AIが画像を解析中...</p></div> : <div className="prose prose-sm max-w-none whitespace-pre-wrap text-sm text-gray-700">{aiResult}</div>}
+                            </div>
+                            <div className="p-4 border-t flex justify-end gap-2">
+                                <button onClick={copyToClipboard} disabled={isAiLoading || !aiResult} className="flex items-center gap-2 px-3 py-2 bg-white border hover:bg-gray-50 text-gray-700 rounded text-sm transition">
+                                    {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}{copied ? 'コピーしました' : '結果をコピー'}
+                                </button>
+                                <button onClick={() => setAiModalOpen(false)} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm font-bold transition">閉じる</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+            );
 };
 
-export default PDFClipperApp;
+            export default PDFClipperApp;
