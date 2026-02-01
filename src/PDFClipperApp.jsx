@@ -459,244 +459,242 @@ const PDFClipperApp = () => {
                                 { type: 'text', text: imagePrompt },
                                 { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Data}` } }
                             ]
-                        }]
-                    })
-                });
-                if (fallbackResponse.ok) {
+                if(fallbackResponse.ok) {
                     const fallbackData = await fallbackResponse.json();
-                    // 繧ｳ繧ｹ繝郁ｨ育ｮ暦ｼ医ヵ繧ｩ繝ｼ繝ｫ繝舌ャ繧ｯ・・
-                    if (fallbackData.usage) {
+                    // OpenRouter APIでタイトル抽出（フォールバック付き）
+                    if(fallbackData.usage) {
                         const modelInfo = AI_MODELS.find(m => m.id === selectedModel);
-                        if (modelInfo) {
-                            const inputTokens = fallbackData.usage.prompt_tokens || 0;
-                            const outputTokens = fallbackData.usage.completion_tokens || 0;
-                            const cost = (inputTokens * modelInfo.inputCost + outputTokens * modelInfo.outputCost) / 1000000;
-                            setTotalCost(prev => prev + cost);
-                        }
-                    }
-                    extractedText = fallbackData.choices?.[0]?.message?.content?.trim() || "タイトル取得失敗";
+                if (modelInfo) {
+                    const inputTokens = fallbackData.usage.prompt_tokens || 0;
+                    const outputTokens = fallbackData.usage.completion_tokens || 0;
+                    const cost = (inputTokens * modelInfo.inputCost + outputTokens * modelInfo.outputCost) / 1000000;
+                    setTotalCost(prev => prev + cost);
                 }
             }
-            setClips(prev => prev.map(c => c.id === clipId ? { ...c, title: extractedText, isAnalyzing: false } : c));
-        } catch (e) {
-            console.error(e);
-            const errorMessage = e.message || "抽出失敗";
-            setClips(prev => prev.map(c => c.id === clipId ? { ...c, isAnalyzing: false, title: `エラー: ${errorMessage.substring(0, 20)}...` } : c));
-            alert(`AI解析エラー: ${e.message}`);
+            extractedText = fallbackData.choices?.[0]?.message?.content?.trim() || "タイトル取得失敗";
         }
+            }
+    setClips(prev => prev.map(c => c.id === clipId ? { ...c, title: extractedText, isAnalyzing: false } : c));
+} catch (e) {
+    console.error(e);
+    const errorMessage = e.message || "抽出失敗";
+    setClips(prev => prev.map(c => c.id === clipId ? { ...c, isAnalyzing: false, title: `エラー: ${errorMessage.substring(0, 20)}...` } : c));
+    alert(`AI解析エラー: ${e.message}`);
+}
     };
 
-    const analyzeAllTitles = async () => {
-        if (!openRouterApiKey) {
-            alert("險ｭ螳壹°繧碓penRouter API繧ｭ繝ｼ繧貞・蜉帙＠縺ｦ縺上□縺輔＞縲・); return; }
-        if (!confirm("リスト内のすべてのクリップに対してAI解析を実行しますか？")) return;
-            for (const clip of clips) { await analyzeTitleWithAI(clip.id); await new Promise(r => setTimeout(r, 500)); }
-        };
+const analyzeAllTitles = async () => {
+    if (!openRouterApiKey) {
+        alert("設定からOpenRouter APIキーを入力してください。"); return;
+    }
+    if (!confirm("リスト内のすべてのクリップに対してAI解析を実行しますか？")) return;
+    for (const clip of clips) { await analyzeTitleWithAI(clip.id); await new Promise(r => setTimeout(r, 500)); }
+};
 
-        const copyToClipboard = () => {
-            const success = copyToClipboardFallback(aiResult);
-            if (success) { setCopied(true); setTimeout(() => setCopied(false), 2000); }
-        };
+const copyToClipboard = () => {
+    const success = copyToClipboardFallback(aiResult);
+    if (success) { setCopied(true); setTimeout(() => setCopied(false), 2000); }
+};
 
-        const formatDateKey = (date) => {
-            const d = new Date(date);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        };
+const formatDateKey = (date) => {
+    const d = new Date(date);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
-        const updateMatrixCount = (date, key, delta) => {
+const updateMatrixCount = (date, key, delta) => {
+    const dKey = formatDateKey(date);
+    setMatrixCounts(prev => {
+        const currentCounts = prev[dKey] || { nikkei: 0, agri: 0, mj: 0, commercial: 0 };
+        const newCount = Math.max(0, (currentCounts[key] || 0) + delta);
+        return { ...prev, [dKey]: { ...currentCounts, [key]: newCount } };
+    });
+};
+
+const copyAndOpenCybozu = () => {
+    const todayStr = formatShortDate(new Date());
+
+    let hasPastCounts = false;
+    for (let i = 1; i < 5; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const key = formatDateKey(d);
+        if (matrixCounts[key]) {
+            if (Object.values(matrixCounts[key]).some(v => v > 0)) {
+                hasPastCounts = true;
+                break;
+            }
+        }
+    }
+
+    let newsText = `${todayStr}分\n\n`;
+
+    NEWSPAPERS.forEach(np => {
+        newsText += `■${np.label}\n`;
+        const dots = [];
+        for (let i = 4; i >= 0; i--) {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
             const dKey = formatDateKey(date);
-            setMatrixCounts(prev => {
-                const currentCounts = prev[dKey] || { nikkei: 0, agri: 0, mj: 0, commercial: 0 };
-                const newCount = Math.max(0, (currentCounts[key] || 0) + delta);
-                return { ...prev, [dKey]: { ...currentCounts, [key]: newCount } };
-            });
-        };
-
-        const copyAndOpenCybozu = () => {
-            const todayStr = formatShortDate(new Date());
-
-            let hasPastCounts = false;
-            for (let i = 1; i < 5; i++) {
-                const d = new Date();
-                d.setDate(d.getDate() - i);
-                const key = formatDateKey(d);
-                if (matrixCounts[key]) {
-                    if (Object.values(matrixCounts[key]).some(v => v > 0)) {
-                        hasPastCounts = true;
-                        break;
+            const count = matrixCounts[dKey]?.[np.key] || 0;
+            if (count > 0) {
+                for (let c = 0; c < count; c++) {
+                    if (hasPastCounts) {
+                        dots.push(`・（${formatShortDate(date)}）`);
+                    } else {
+                        dots.push(`・`);
                     }
                 }
             }
+        }
+        if (dots.length > 0) newsText += dots.join('\n') + '\n';
+        newsText += '\n';
+    });
 
-            let newsText = `${todayStr}分\n\n`;
+    const titlesList = clips.map(c => c.title ? `・${c.title}` : null).filter(Boolean).join('\n');
+    const copyText = newsText + titlesList;
+    copyToClipboardFallback(copyText);
+    window.open('https://op7oo.cybozu.com/o/ag.cgi?page=MyFolderMessageView&mid=455345&mdbid=10', '_blank');
+};
 
-            NEWSPAPERS.forEach(np => {
-                newsText += `■${np.label}\n`;
-                const dots = [];
-                for (let i = 4; i >= 0; i--) {
-                    const date = new Date();
-                    date.setDate(date.getDate() - i);
-                    const dKey = formatDateKey(date);
-                    const count = matrixCounts[dKey]?.[np.key] || 0;
-                    if (count > 0) {
-                        for (let c = 0; c < count; c++) {
-                            if (hasPastCounts) {
-                                dots.push(`・（${formatShortDate(date)}）`);
-                            } else {
-                                dots.push(`・`);
-                            }
-                        }
-                    }
-                }
-                if (dots.length > 0) newsText += dots.join('\n') + '\n';
-                newsText += '\n';
-            });
+const createPdfBlob = async (targetClips = clips) => {
+    if (!window.PDFLib || targetClips.length === 0) return null;
+    const { PDFDocument } = window.PDFLib;
+    const doc = await PDFDocument.create();
+    const A4_WIDTH = 595.28, A4_HEIGHT = 841.89;
+    for (const clip of targetClips) {
+        const image = await doc.embedJpg(clip.dataUrl);
+        const { width: imgW, height: imgH } = image.scale(1.0);
+        const isLandscape = imgW > imgH;
+        const pageWidth = isLandscape ? A4_HEIGHT : A4_WIDTH;
+        const pageHeight = isLandscape ? A4_WIDTH : A4_HEIGHT;
+        const page = doc.addPage([pageWidth, pageHeight]);
+        const margin = 20;
+        const availW = pageWidth - margin * 2, availH = pageHeight - margin * 2;
+        const baseScale = Math.min(availW / imgW, availH / imgH);
+        const userScale = (clip.scalePercent || 100) / 100;
+        const finalScale = baseScale * userScale;
+        const drawW = imgW * finalScale, drawH = imgH * finalScale;
+        page.drawImage(image, { x: (pageWidth - drawW) / 2, y: (pageHeight - drawH) / 2, width: drawW, height: drawH });
+    }
+    return new Blob([await doc.save()], { type: 'application/pdf' });
+};
 
-            const titlesList = clips.map(c => c.title ? `・${c.title}` : null).filter(Boolean).join('\n');
-            const copyText = newsText + titlesList;
-            copyToClipboardFallback(copyText);
-            window.open('https://op7oo.cybozu.com/o/ag.cgi?page=MyFolderMessageView&mid=455345&mdbid=10', '_blank');
-        };
+const downloadPDF = async () => {
+    const blob = await createPdfBlob();
+    if (!blob) return;
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    const fileName = outputFileName.trim() || 'merged_document';
+    link.download = fileName.toLowerCase().endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+    link.click();
+};
 
-        const createPdfBlob = async (targetClips = clips) => {
-            if (!window.PDFLib || targetClips.length === 0) return null;
-            const { PDFDocument } = window.PDFLib;
-            const doc = await PDFDocument.create();
-            const A4_WIDTH = 595.28, A4_HEIGHT = 841.89;
-            for (const clip of targetClips) {
-                const image = await doc.embedJpg(clip.dataUrl);
-                const { width: imgW, height: imgH } = image.scale(1.0);
-                const isLandscape = imgW > imgH;
-                const pageWidth = isLandscape ? A4_HEIGHT : A4_WIDTH;
-                const pageHeight = isLandscape ? A4_WIDTH : A4_HEIGHT;
-                const page = doc.addPage([pageWidth, pageHeight]);
-                const margin = 20;
-                const availW = pageWidth - margin * 2, availH = pageHeight - margin * 2;
-                const baseScale = Math.min(availW / imgW, availH / imgH);
-                const userScale = (clip.scalePercent || 100) / 100;
-                const finalScale = baseScale * userScale;
-                const drawW = imgW * finalScale, drawH = imgH * finalScale;
-                page.drawImage(image, { x: (pageWidth - drawW) / 2, y: (pageHeight - drawH) / 2, width: drawW, height: drawH });
+const downloadSplitPDFs = async () => {
+    if (!window.JSZip || clips.length === 0) return;
+    const zip = new window.JSZip();
+    let clipIndex = 0;
+
+    // 日付別 (4日前 -> 今日)
+    for (let i = 4; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        const dKey = formatDateKey(date);
+        const dateStr = formatDate(date); // YYYY.MM.DD
+
+        // 新聞社別
+        let dateClips = [];
+        for (const np of NEWSPAPERS) {
+            const count = matrixCounts[dKey]?.[np.key] || 0;
+            if (count > 0) {
+                // クリップリストから該当件数分を切り出す
+                const slice = clips.slice(clipIndex, clipIndex + count);
+                dateClips = [...dateClips, ...slice];
+                clipIndex += count;
             }
-            return new Blob([await doc.save()], { type: 'application/pdf' });
-        };
+        }
 
-        const downloadPDF = async () => {
-            const blob = await createPdfBlob();
-            if (!blob) return;
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            const fileName = outputFileName.trim() || 'merged_document';
-            link.download = fileName.toLowerCase().endsWith('.pdf') ? fileName : `${fileName}.pdf`;
-            link.click();
-        };
+        if (dateClips.length > 0) {
+            const blob = await createPdfBlob(dateClips);
+            if (blob) zip.file(`${dateStr}.pdf`, blob);
+        }
+    }
 
-        const downloadSplitPDFs = async () => {
-            if (!window.JSZip || clips.length === 0) return;
-            const zip = new window.JSZip();
-            let clipIndex = 0;
+    // 菴吶▲縺溘け繝ｪ繝・・縺後≠繧後・縲後◎縺ｮ莉悶阪↓蜈･繧後ｋ
+    if (clipIndex < clips.length) {
+        const extraClips = clips.slice(clipIndex);
+        const blob = await createPdfBlob(extraClips);
+        if (blob) zip.file(`others_${formatDate(new Date())
+            }.pdf`, blob);
+    }
 
-            // 譌･莉・ 蜿､縺・・(4譌･蜑・-> 莉頑律)
-            for (let i = 4; i >= 0; i--) {
-                const date = new Date();
-                date.setDate(date.getDate() - i);
-                const dKey = formatDateKey(date);
-                const dateStr = formatDate(date); // YYYY.MM.DD
+    const content = await zip.generateAsync({ type: "blob" });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(content);
+    link.download = `split_pdfs_${formatDate(new Date())}.zip`;
+    link.click();
+};
 
-                // 譁ｰ閨樣・
-                let dateClips = [];
-                for (const np of NEWSPAPERS) {
-                    const count = matrixCounts[dKey]?.[np.key] || 0;
-                    if (count > 0) {
-                        // 繧ｯ繝ｪ繝・・繝ｪ繧ｹ繝医°繧牙ｿ・ｦ∵焚蛻・叙蠕・
-                        const slice = clips.slice(clipIndex, clipIndex + count);
-                        dateClips = [...dateClips, ...slice];
-                        clipIndex += count;
-                    }
-                }
+const previewPDF = async () => { const blob = await createPdfBlob(); if (blob) setPreviewUrl(URL.createObjectURL(blob)); };
+const changePage = (delta) => {
+    if (selectedFileIndex === null) return;
+    const newPage = currentPage + delta;
+    if (newPage >= 1 && newPage <= files[selectedFileIndex].pageCount) { setCurrentPage(newPage); setMasks([]); }
+};
 
-                if (dateClips.length > 0) {
-                    const blob = await createPdfBlob(dateClips);
-                    if (blob) zip.file(`${dateStr}.pdf`, blob);
-                }
-            }
-
-            // 菴吶▲縺溘け繝ｪ繝・・縺後≠繧後・縲後◎縺ｮ莉悶阪↓蜈･繧後ｋ
-            if (clipIndex < clips.length) {
-                const extraClips = clips.slice(clipIndex);
-                const blob = await createPdfBlob(extraClips);
-                if (blob) zip.file(`others_${formatDate(new Date())
-                    }.pdf`, blob);
-            }
-
-            const content = await zip.generateAsync({ type: "blob" });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(content);
-            link.download = `split_pdfs_${formatDate(new Date())}.zip`;
-            link.click();
-        };
-
-        const previewPDF = async () => { const blob = await createPdfBlob(); if (blob) setPreviewUrl(URL.createObjectURL(blob)); };
-        const changePage = (delta) => {
-            if (selectedFileIndex === null) return;
-            const newPage = currentPage + delta;
-            if (newPage >= 1 && newPage <= files[selectedFileIndex].pageCount) { setCurrentPage(newPage); setMasks([]); }
-        };
-
-        const selectFile = (index) => {
-            if (editingClipId && !confirm("邱ｨ髮・ｸｭ縺ｧ縺吶らｴ譽・＠縺ｦ蛻･縺ｮ繝輔ぃ繧､繝ｫ繧帝幕縺阪∪縺吶°・・)) return;
+const selectFile = (index) => {
+    if (editingClipId && !confirm("邱ｨ髮・ｸｭ縺ｧ縺吶らｴ譽・＠縺ｦ蛻･縺ｮ繝輔ぃ繧､繝ｫ繧帝幕縺阪∪縺吶°・・)) return;
         setEditingClipId(null);
-            setSelectedFileIndex(index);
-            setCurrentPage(1);
-            setRotation(0);
-            setMasks([]);
-            setCropRect({ x: 0, y: 0, w: 0, h: 0 });
-            setZoomLevel(1.0);
-            setMode('view');
-        };
+    setSelectedFileIndex(index);
+    setCurrentPage(1);
+    setRotation(0);
+    setMasks([]);
+    setCropRect({ x: 0, y: 0, w: 0, h: 0 });
+    setZoomLevel(1.0);
+    setMode('view');
+};
 
-        const removeMask = (index) => { setMasks(masks.filter((_, i) => i !== index)); };
-        const removeClip = (id) => { setClips(clips.filter(c => c.id !== id)); if (editingClipId === id) setEditingClipId(null); };
-        const cancelEdit = () => { setEditingClipId(null); };
+const removeMask = (index) => { setMasks(masks.filter((_, i) => i !== index)); };
+const removeClip = (id) => { setClips(clips.filter(c => c.id !== id)); if (editingClipId === id) setEditingClipId(null); };
+const cancelEdit = () => { setEditingClipId(null); };
 
-        const RectHandles = ({ x, y, w, h, color }) => {
-            const hs = 1.5;
-            return (
-                <g fill={color} stroke="white" strokeWidth="1">
-                    <rect x={`${x * 100 - hs / 2}% `} y={`${y * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
-                    <rect x={`${(x + w) * 100 - hs / 2}% `} y={`${y * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
-                    <rect x={`${x * 100 - hs / 2}% `} y={`${(y + h) * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
-                    <rect x={`${(x + w) * 100 - hs / 2}% `} y={`${(y + h) * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
-                </g>
-            );
-        };
+const RectHandles = ({ x, y, w, h, color }) => {
+    const hs = 1.5;
+    return (
+        <g fill={color} stroke="white" strokeWidth="1">
+            <rect x={`${x * 100 - hs / 2}% `} y={`${y * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
+            <rect x={`${(x + w) * 100 - hs / 2}% `} y={`${y * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
+            <rect x={`${x * 100 - hs / 2}% `} y={`${(y + h) * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
+            <rect x={`${(x + w) * 100 - hs / 2}% `} y={`${(y + h) * 100 - hs / 2}% `} width={`${hs}% `} height={`${hs}% `} />
+        </g>
+    );
+};
 
-        return (
-            <div className="flex flex-col h-screen bg-gray-100 text-gray-800 font-sans" onDragOver={(e) => e.preventDefault()} onDrop={onDrop} onPaste={onPaste}>
-                <header className="bg-white shadow px-4 py-3 flex items-center justify-between z-10">
-                    <div className="flex items-center gap-2">
-                        <Scissors className="text-blue-600 w-6 h-6" />
-                        <h1 className="text-xl font-bold text-gray-700">PDF Clipper & Merger</h1>
-                    </div>
-                    <div className="flex gap-2">
-                        <button onClick={() => setSettingsOpen(true)} className="p-2 hover:bg-gray-100 rounded transition" title="險ｭ螳・>
-                        <Settings className="w-5 h-5 text-gray-600" />
-                    </button>
-                    <label className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded cursor-pointer transition">
-                        <Upload className="w-4 h-4" /><span className="text-sm">PDF霑ｽ蜉</span>
-                        <input type="file" multiple accept="application/pdf" className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
-                    </label>
-                    <div className="flex gap-1">
-                        <button onClick={previewPDF} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - blue - 600 border border - blue - 600 font - bold transition ${clips.length > 0 ? 'hover:bg-blue-50' : 'opacity-50 cursor-not-allowed'} `} title="繝励Ξ繝薙Η繝ｼ">
-                            <Eye className="w-4 h-4" /><span className="hidden sm:inline">繝励Ξ繝薙Η繝ｼ</span>
-                        </button>
-                        <button onClick={downloadSplitPDFs} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - white font - bold transition ${clips.length > 0 ? 'bg-teal-600 hover:bg-teal-700' : 'bg-gray-400 cursor-not-allowed'} `} title="譌･莉倥＃縺ｨ縺ｫ蛻・牡縺励※繝繧ｦ繝ｳ繝ｭ繝ｼ繝・>
-                            <Download className="w-4 h-4" />蛻・牡DL
-                    </button>
-                    <button onClick={downloadPDF} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - white font - bold transition ${clips.length > 0 ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'} `}>
-                        <FileText className="w-4 h-4" />荳諡ｬPDF
-                    </button>
+return (
+    <div className="flex flex-col h-screen bg-gray-100 text-gray-800 font-sans" onDragOver={(e) => e.preventDefault()} onDrop={onDrop} onPaste={onPaste}>
+        <header className="bg-white shadow px-4 py-3 flex items-center justify-between z-10">
+            <div className="flex items-center gap-2">
+                <Scissors className="text-blue-600 w-6 h-6" />
+                <h1 className="text-xl font-bold text-gray-700">PDF Clipper & Merger</h1>
             </div>
+            <div className="flex gap-2">
+                <button onClick={() => setSettingsOpen(true)} className="p-2 hover:bg-gray-100 rounded transition" title="險ｭ螳・>
+                        <Settings className="w-5 h-5 text-gray-600" />
+            </button>
+            <label className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded cursor-pointer transition">
+                <Upload className="w-4 h-4" /><span className="text-sm">PDF霑ｽ蜉</span>
+                <input type="file" multiple accept="application/pdf" className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
+            </label>
+            <div className="flex gap-1">
+                <button onClick={previewPDF} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - blue - 600 border border - blue - 600 font - bold transition ${clips.length > 0 ? 'hover:bg-blue-50' : 'opacity-50 cursor-not-allowed'} `} title="繝励Ξ繝薙Η繝ｼ">
+                    <Eye className="w-4 h-4" /><span className="hidden sm:inline">繝励Ξ繝薙Η繝ｼ</span>
+                </button>
+                <button onClick={downloadSplitPDFs} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - white font - bold transition ${clips.length > 0 ? 'bg-teal-600 hover:bg-teal-700' : 'bg-gray-400 cursor-not-allowed'} `} title="譌･莉倥＃縺ｨ縺ｫ蛻・牡縺励※繝繧ｦ繝ｳ繝ｭ繝ｼ繝・>
+                            <Download className="w-4 h-4" />蛻・牡DL
+            </button>
+            <button onClick={downloadPDF} disabled={clips.length === 0} className={`flex items - center gap - 2 px - 4 py - 2 rounded text - white font - bold transition ${clips.length > 0 ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'} `}>
+                <FileText className="w-4 h-4" />荳諡ｬPDF
+            </button>
+    </div>
                 </div >
             </header >
 
