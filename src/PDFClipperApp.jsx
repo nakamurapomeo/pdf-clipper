@@ -625,7 +625,7 @@ const PDFClipperApp = () => {
                     <div className="p-2 bg-gray-50 border-b">
                         <div className="text-xs font-bold text-gray-500 mb-2 px-1">記事数カウンター</div>
                         <div className="overflow-x-auto">
-                            <table className="w-full text-center text-xs collapse border-hidden">
+                            <table className="w-full text-center text-xs border-collapse">
                                 <thead>
                                     <tr>
                                         <th className="p-1 text-left font-normal text-gray-400 w-16"></th>
