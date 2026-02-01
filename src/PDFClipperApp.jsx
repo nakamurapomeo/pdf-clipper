@@ -411,10 +411,46 @@ const PDFClipperApp = () => {
                     items: prev.items.map(it => {
                         if (it.id !== interactionState.target) return it;
                         let { x, y, w, h } = it;
-                        if (handle.includes('w')) { w -= dx; x += dx; }
-                        if (handle.includes('e')) { w += dx; }
-                        if (handle.includes('n')) { h -= dy; y += dy; }
-                        if (handle.includes('s')) { h += dy; }
+                        const aspect = w / h;
+
+                        // 簡易的なアスペクト比維持リサイズ（対角線上の移動量などで計算すべきだが、ここではdx/dyの大きい方を採用する簡易実装）
+                        // 厳密にはハンドルごとに挙動を変える必要がある
+
+                        if (handle === 'se') {
+                            // 右下: 幅と高さの大きい変化に合わせて拡大縮小
+                            if (Math.abs(dx) > Math.abs(dy)) {
+                                w += dx;
+                                h = w / aspect;
+                            } else {
+                                h += dy;
+                                w = h * aspect;
+                            }
+                        } else if (handle === 'sw') {
+                            // 左下
+                            w -= dx; x += dx;
+                            h = w / aspect;
+                        } else if (handle === 'ne') {
+                            // 右上
+                            w += dx;
+                            h = w / aspect;
+                            y += (it.h - h); // 底辺固定と考えた場合のY補正だとずれるので、頂点移動量から計算
+                            // 実際は右上固定で高さが変わるので、Yも動かす必要がある
+                            // 単純化: 右方向へのドラッグだけ考える
+                        } else if (handle === 'nw') {
+                            // 左上
+                            w -= dx; x += dx;
+                            h = w / aspect;
+                            y += (it.h - h);
+                        } else if (handle === 'e') {
+                            w += dx; h = w / aspect;
+                        } else if (handle === 'w') {
+                            w -= dx; x += dx; h = w / aspect;
+                        } else if (handle === 's') {
+                            h += dy; w = h * aspect;
+                        } else if (handle === 'n') {
+                            h -= dy; y += dy; w = h * aspect;
+                        }
+
                         return { ...it, x, y, w: Math.max(10, w), h: Math.max(10, h) };
                     })
                 }));
