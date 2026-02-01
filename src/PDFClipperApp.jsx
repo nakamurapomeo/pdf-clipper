@@ -80,6 +80,7 @@ const PDFClipperApp = () => {
     const [interactionState, setInteractionState] = useState({ type: 'none', target: null, index: null });
     const [startPos, setStartPos] = useState({ x: 0, y: 0 });
     const [pageThumbnails, setPageThumbnails] = useState([]);
+    const [draggedClipId, setDraggedClipId] = useState(null);
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -452,7 +453,12 @@ const PDFClipperApp = () => {
         } else if (!isSingleDay) {
             const firstDate = new Date(dateKeys[0]);
             const lastDate = new Date(dateKeys[dateKeys.length - 1]);
-            dateRangeText = `${firstDate.getMonth() + 1}/${firstDate.getDate()}-${lastDate.getDate()}分`;
+            // 月またぎ判定
+            if (firstDate.getMonth() === lastDate.getMonth()) {
+                dateRangeText = `${firstDate.getMonth() + 1}/${firstDate.getDate()}-${lastDate.getDate()}分`;
+            } else {
+                dateRangeText = `${firstDate.getMonth() + 1}/${firstDate.getDate()}-${lastDate.getMonth() + 1}/${lastDate.getDate()}分`;
+            }
         }
 
         // 全クリップを新聞別にグループ化
@@ -583,8 +589,8 @@ const PDFClipperApp = () => {
                 <div className={`${rightSidebarOpen ? 'w-72 border-l' : 'w-0'} bg-white transition-all overflow-y-auto flex flex-col`}>
                     <div className="p-4 bg-gray-50 border-b font-extrabold text-sm flex justify-between">結合リスト <span className="text-blue-600">{clips.length}</span></div>
                     <div className="flex-1 p-3 space-y-4">
-                        {clips.map(c => (
-                            <div key={c.id} className="p-3 border rounded-xl bg-white shadow-sm space-y-3 hover:shadow-md transition-shadow ring-1 ring-black/5">
+                        {clips.map((c, idx) => (
+                            <div key={c.id} draggable onDragStart={() => setDraggedClipId(c.id)} onDragOver={(e) => e.preventDefault()} onDrop={() => { if (draggedClipId && draggedClipId !== c.id) { const fromIdx = clips.findIndex(x => x.id === draggedClipId); const toIdx = idx; const newClips = [...clips]; const [moved] = newClips.splice(fromIdx, 1); newClips.splice(toIdx, 0, moved); setClips(newClips); } setDraggedClipId(null); }} className={`p-3 border rounded-xl bg-white shadow-sm space-y-3 hover:shadow-md transition-shadow ring-1 ring-black/5 cursor-grab ${draggedClipId === c.id ? 'opacity-50' : ''}`}>
                                 <div className="relative aspect-video bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center">
                                     <img src={c.dataUrl} className="max-w-full max-h-full object-contain" alt="clip" />
                                     <button onClick={() => setClips(clips.filter(x => x.id !== c.id))} className="absolute top-1 right-1 p-1 bg-white/80 rounded-full text-red-500 hover:bg-red-50 shadow-sm"><X size={14} /></button>
