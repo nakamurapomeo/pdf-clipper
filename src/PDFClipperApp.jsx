@@ -17,6 +17,10 @@ const useScript = (src) => {
 
 const formatDate = (date) => `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
 const formatShortDate = (date) => `${date.getMonth() + 1}/${date.getDate()}`;
+const formatFileNameDate = (date) => {
+    const d = new Date(date);
+    return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
+};
 const formatDateKey = (date) => {
     const d = new Date(date);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -152,7 +156,9 @@ const PDFClipperApp = () => {
         offscreen.width = w; offscreen.height = h;
         ctx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
         const dataUrl = offscreen.toDataURL('image/jpeg');
-        const newClip = { id: Date.now(), dataUrl, title: '', scalePercent: 100, aspectRatio: w / h };
+        // デフォルトで今日の日付と最初の新聞種別を設定
+        const todayKey = formatDateKey(new Date());
+        const newClip = { id: Date.now(), dataUrl, title: '', scalePercent: 100, aspectRatio: w / h, date: todayKey, newspaper: 'agri' };
         setClips([...clips, newClip]);
         setCropRect({ x: 0, y: 0, w: 0, h: 0 });
         setMode('view');
@@ -221,10 +227,124 @@ const PDFClipperApp = () => {
         link.click();
     };
 
+    // 日別PDF出力機能
+    const downloadDailyPDFs = async () => {
+        if (!window.PDFLib || clips.length === 0) {
+            alert('クリップがありません。');
+            return;
+        }
+        // 日付でグループ化
+        const clipsByDate = {};
+        for (const clip of clips) {
+            const dateKey = clip.date || formatDateKey(new Date());
+            if (!clipsByDate[dateKey]) clipsByDate[dateKey] = [];
+            clipsByDate[dateKey].push(clip);
+        }
+        // 新聞順でソート
+        const newspaperOrder = { agri: 0, nikkei: 1, mj: 2, commercial: 3 };
+        for (const dateKey in clipsByDate) {
+            clipsByDate[dateKey].sort((a, b) => (newspaperOrder[a.newspaper] || 0) - (newspaperOrder[b.newspaper] || 0));
+        }
+        const dateKeys = Object.keys(clipsByDate).sort();
+        if (dateKeys.length === 1) {
+            // 1日分のみの場合は直接ダウンロード
+            const blob = await createPdfBlob(clipsByDate[dateKeys[0]]);
+            if (!blob) return;
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${fileNamePrefix}${formatFileNameDate(dateKeys[0])}.pdf`;
+            link.click();
+        } else {
+            // 複数日の場合はZIPでダウンロード
+            if (!window.JSZip) {
+                alert('JSZipがロードされていません。');
+                return;
+            }
+            const zip = new window.JSZip();
+            for (const dateKey of dateKeys) {
+                const blob = await createPdfBlob(clipsByDate[dateKey]);
+                if (blob) {
+                    zip.file(`${fileNamePrefix}${formatFileNameDate(dateKey)}.pdf`, blob);
+                }
+            }
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(zipBlob);
+            link.download = `共有事項_${formatDate(new Date())}.zip`;
+            link.click();
+        }
+    };
+
+    // テキスト生成機能
+    const generateShareText = () => {
+        if (clips.length === 0) {
+            alert('クリップがありません。');
+            return '';
+        }
+        // 日付でグループ化
+        const clipsByDate = {};
+        for (const clip of clips) {
+            const dateKey = clip.date || formatDateKey(new Date());
+            if (!clipsByDate[dateKey]) clipsByDate[dateKey] = [];
+            clipsByDate[dateKey].push(clip);
+        }
+        const dateKeys = Object.keys(clipsByDate).sort();
+        const todayKey = formatDateKey(new Date());
+        const isTodayOnly = dateKeys.length === 1 && dateKeys[0] === todayKey;
+        const isSingleDay = dateKeys.length === 1;
+
+        // 日付範囲の計算
+        let dateRangeText = '';
+        if (!isTodayOnly && isSingleDay) {
+            const d = new Date(dateKeys[0]);
+            dateRangeText = `${d.getMonth() + 1}/${d.getDate()}`;
+        } else if (!isSingleDay) {
+            const firstDate = new Date(dateKeys[0]);
+            const lastDate = new Date(dateKeys[dateKeys.length - 1]);
+            dateRangeText = `${firstDate.getMonth() + 1}/${firstDate.getDate()}-${lastDate.getDate()}分`;
+        }
+
+        // 全クリップを新聞別にグループ化
+        const clipsByNewspaper = {};
+        for (const clip of clips) {
+            const np = clip.newspaper || 'agri';
+            if (!clipsByNewspaper[np]) clipsByNewspaper[np] = [];
+            clipsByNewspaper[np].push(clip);
+        }
+
+        let result = '';
+        if (dateRangeText) {
+            result += dateRangeText + '\n\n';
+        }
+
+        for (const np of NEWSPAPERS) {
+            const npClips = clipsByNewspaper[np.key];
+            if (npClips && npClips.length > 0) {
+                result += `■${np.label}\n`;
+                for (const clip of npClips) {
+                    const d = new Date(clip.date || todayKey);
+                    const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+                    result += `・${clip.title || '（タイトル未設定）'}（${dateStr}）\n`;
+                }
+                result += '\n';
+            }
+        }
+        return result.trim();
+    };
+
+    const copyShareText = () => {
+        const text = generateShareText();
+        if (text) {
+            copyToClipboardFallback(text);
+            alert('共有テキストをコピーしました。');
+        }
+    };
+
     const copyAndOpenCybozu = () => {
-        const text = clips.map(c => `・${c.title}`).join('\n');
+        const text = generateShareText();
+        if (!text) return;
         copyToClipboardFallback(text);
-        alert("タイトルをコピーしました。Cybozuを開きます。");
+        alert('テキストをコピーしました。Cybozuを開きます。');
         window.open('https://op7oo.cybozu.com/o/ag.cgi?page=MyFolderMessageView&mid=455345&mdbid=10', '_blank');
     };
 
@@ -315,6 +435,18 @@ const PDFClipperApp = () => {
                                     <input value={c.title} onChange={(e) => setClips(clips.map(x => x.id === c.id ? { ...x, title: e.target.value } : x))} className="flex-1 text-xs border rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-blue-100 outline-none" placeholder="記事タイトル..." />
                                     <button onClick={() => analyzeTitleWithAI(c.id)} className="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-colors shadow-sm">{c.isAnalyzing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}</button>
                                 </div>
+                                <div className="flex gap-2">
+                                    <select value={c.date || formatDateKey(new Date())} onChange={(e) => setClips(clips.map(x => x.id === c.id ? { ...x, date: e.target.value } : x))} className="flex-1 text-[10px] border rounded-lg px-2 py-1 outline-none bg-white">
+                                        {[0, 1, 2, 3, 4].map(i => {
+                                            const d = new Date(Date.now() - i * 86400000);
+                                            const key = formatDateKey(d);
+                                            return <option key={key} value={key}>{formatShortDate(d)}</option>;
+                                        })}
+                                    </select>
+                                    <select value={c.newspaper || 'agri'} onChange={(e) => setClips(clips.map(x => x.id === c.id ? { ...x, newspaper: e.target.value } : x))} className="flex-1 text-[10px] border rounded-lg px-2 py-1 outline-none bg-white">
+                                        {NEWSPAPERS.map(np => <option key={np.key} value={np.key}>{np.label}</option>)}
+                                    </select>
+                                </div>
                                 <div className="flex items-center gap-2 text-[10px] text-gray-400">
                                     <span>サイズ: {c.scalePercent}%</span>
                                     <input type="range" min="10" max="100" value={c.scalePercent} onChange={(e) => setClips(clips.map(x => x.id === c.id ? { ...x, scalePercent: parseInt(e.target.value) } : x))} className="flex-1 h-1 bg-gray-100 appearance-none rounded-full cursor-pointer accent-blue-500" />
@@ -323,10 +455,13 @@ const PDFClipperApp = () => {
                         ))}
                         {clips.length === 0 && <div className="text-center py-20 text-gray-300 text-xs italic">クリップを追加してください</div>}
                     </div>
-                    <div className="p-4 bg-gray-50 border-t space-y-3">
-                        <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">すべてAI解析</button>
-                        <button onClick={copyAndOpenCybozu} className="w-full py-2.5 bg-white border border-blue-600 text-blue-600 rounded-xl text-xs font-bold hover:bg-blue-50 transition-all active:scale-95">Cybozuへ投稿</button>
-                        <button onClick={downloadPDF} className="w-full py-2.5 bg-gray-800 text-white rounded-xl text-xs font-bold shadow-lg hover:bg-black transition-all active:scale-95">PDFをダウンロード</button>
+                    <div className="p-4 bg-gray-50 border-t space-y-2">
+                        <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">すべてAI解析</button>
+                        <button onClick={copyShareText} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-green-600 to-teal-600 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">共有テキストをコピー</button>
+                        <button onClick={downloadDailyPDFs} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">日別PDFを出力</button>
+                        <div className="border-t my-2"></div>
+                        <button onClick={copyAndOpenCybozu} className="w-full py-2 bg-white border border-blue-600 text-blue-600 rounded-xl text-xs font-bold hover:bg-blue-50 transition-all active:scale-95">Cybozuへ投稿</button>
+                        <button onClick={downloadPDF} className="w-full py-2 bg-gray-800 text-white rounded-xl text-xs font-bold shadow-lg hover:bg-black transition-all active:scale-95">PDFをダウンロード</button>
                     </div>
                 </div>
             </div>
