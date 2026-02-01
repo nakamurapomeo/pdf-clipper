@@ -353,12 +353,25 @@ const PDFClipperApp = () => {
         const x = cropRect.x * canvas.width, y = cropRect.y * canvas.height, w = cropRect.w * canvas.width, h = cropRect.h * canvas.height;
         offscreen.width = w; offscreen.height = h;
         ctx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
+        // 白塗りを適用
+        ctx.fillStyle = 'white';
+        for (const mask of masks) {
+            const mx = (mask.x - cropRect.x) * canvas.width;
+            const my = (mask.y - cropRect.y) * canvas.height;
+            const mw = mask.w * canvas.width;
+            const mh = mask.h * canvas.height;
+            ctx.fillRect(mx, my, mw, mh);
+        }
         const dataUrl = offscreen.toDataURL('image/jpeg');
         // カウンターに基づいて自動割り当て
         const { date, newspaper } = getNextDateNewspaper();
-        const newClip = { id: Date.now(), dataUrl, title: '', scalePercent: 100, aspectRatio: w / h, date, newspaper };
-        setClips([...clips, newClip]);
+        const newClipId = Date.now();
+        const newClip = { id: newClipId, dataUrl, title: '', scalePercent: 100, aspectRatio: w / h, date, newspaper };
+        setClips(prev => [...prev, newClip]);
         setCropRect({ x: 0, y: 0, w: 0, h: 0 });
+        setMasks([]);
+        // 自動AI解析を実行
+        setTimeout(() => analyzeTitleWithAI(newClipId), 100);
     };
 
     // 再割り当て: カウンターに基づいてすべてのクリップの日付・新聞を再設定
@@ -420,7 +433,7 @@ const PDFClipperApp = () => {
         }
     };
 
-    const analyzeAllTitles = async () => { if (confirm("全件解析を開始しますか？")) for (const c of clips) await analyzeTitleWithAI(c.id); };
+    const analyzeAllTitles = async () => { for (const c of clips) await analyzeTitleWithAI(c.id); };
 
     const updateMatrixCount = (date, key, delta) => {
         const dKey = formatDateKey(date);
