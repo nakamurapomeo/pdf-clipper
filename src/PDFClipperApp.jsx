@@ -41,11 +41,13 @@ const copyToClipboardFallback = (text) => {
 };
 
 const AI_MODELS = [
-    { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', inputCost: 0.1, outputCost: 0.4 },
-    { id: 'google/gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash', inputCost: 0.1, outputCost: 0.4 },
-    { id: 'google/gemini-2.5-pro-preview', name: 'Gemini 2.5 Pro', inputCost: 1.25, outputCost: 5.0 },
-    { id: 'google/gemini-3.0-flash', name: 'Gemini 3.0 Flash', inputCost: 0.1, outputCost: 0.4 },
-    { id: 'google/gemini-3.0-pro', name: 'Gemini 3.0 Pro', inputCost: 1.25, outputCost: 5.0 },
+    { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash' },
+    { id: 'google/gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash' },
+    { id: 'google/gemini-2.5-pro-preview-03-25', name: 'Gemini 2.5 Pro' },
+    { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
+    { id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku' },
+    { id: 'openai/gpt-4o', name: 'GPT-4o' },
+    { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini' },
 ];
 const NEWSPAPERS = [
     { key: 'agri', label: '日本農業新聞', shortLabel: '農業' },
