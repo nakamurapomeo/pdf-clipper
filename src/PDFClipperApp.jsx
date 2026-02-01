@@ -581,10 +581,7 @@ const PDFClipperApp = () => {
 
     const copyShareText = () => {
         const text = generateShareText();
-        if (text) {
-            copyToClipboardFallback(text);
-            alert('共有テキストをコピーしました。');
-        }
+        if (text) copyToClipboardFallback(text);
     };
 
     const copyAndOpenCybozu = () => {
@@ -596,17 +593,6 @@ const PDFClipperApp = () => {
 
     return (
         <div className="flex flex-col h-screen bg-gray-50 text-gray-800 font-sans" onDragOver={handleDragOver} onDrop={handleDrop}>
-            <header className="h-14 bg-white border-b shadow-sm flex items-center justify-between px-4 z-10">
-                <div className="flex items-center gap-2 text-blue-600"><Scissors size={24} /> <h1 className="font-extrabold text-xl tracking-tight">PDF Clipper</h1></div>
-                <div className="flex gap-2">
-                    <button onClick={() => setSettingsOpen(true)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-all"><Settings size={20} /></button>
-                    <button onClick={handlePasteFromClipboard} className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-200 transition-all active:scale-95"><Clipboard size={16} /><span>貼り付け</span></button>
-                    <label className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-bold cursor-pointer hover:bg-blue-700 shadow-md transition-all active:scale-95">
-                        <Upload size={16} /><span>PDF追加</span>
-                        <input type="file" multiple accept="application/pdf" className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
-                    </label>
-                </div>
-            </header>
             <div className="flex flex-1 overflow-hidden">
                 <div className={`${leftSidebarOpen ? 'w-64 border-r' : 'w-0'} bg-white transition-all overflow-y-auto overflow-x-hidden flex flex-col`}>
                     <div className="p-3 bg-gray-50 border-b">
@@ -649,11 +635,20 @@ const PDFClipperApp = () => {
                                 <span className="text-[10px] w-10 text-center font-mono">{rotation.toFixed(1)}°</span>
                                 <button onClick={() => setRotation(r => r + 0.1)} className="p-1 hover:bg-gray-200 rounded text-[10px] font-bold">+0.1</button>
                             </div>
+                            <div className="w-px h-6 bg-gray-200 mx-2"></div>
+                            <div className="flex items-center gap-1 bg-gray-50 px-2 rounded-lg">
+                                <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} className="hover:text-blue-600 transition-colors"><Minus size={14} /></button>
+                                <span className="text-[10px] font-bold w-10 text-center">{Math.round(zoomLevel * 100)}%</span>
+                                <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))} className="hover:text-blue-600 transition-colors"><Plus size={14} /></button>
+                            </div>
                         </div>
-                        <div className="flex items-center gap-3 bg-gray-50 px-4 py-1.5 rounded-full">
-                            <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} className="hover:text-blue-600 transition-colors"><Minus size={16} /></button>
-                            <span className="text-xs font-bold w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
-                            <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))} className="hover:text-blue-600 transition-colors"><Plus size={16} /></button>
+                        <div className="flex gap-2">
+                            <button onClick={() => setSettingsOpen(true)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-all"><Settings size={18} /></button>
+                            <button onClick={handlePasteFromClipboard} className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-all"><Clipboard size={14} /><span>貼り付け</span></button>
+                            <label className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-blue-700 shadow-sm transition-all">
+                                <Upload size={14} /><span>PDF追加</span>
+                                <input type="file" multiple accept="application/pdf" className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
+                            </label>
                         </div>
                     </div>
                     <div ref={containerRef} className="flex-1 overflow-auto p-8 flex justify-center no-scrollbar" onDragOver={handleDragOver} onDrop={handleDrop} onWheel={handleWheel}>
