@@ -84,6 +84,7 @@ const PDFClipperApp = () => {
     const [explanationPrompt, setExplanationPrompt] = useState('この新聞記事の内容を日本語でわかりやすく解説してください。記事の要点、背景、重要なポイントを簡潔にまとめてください。');
     const [explanationResult, setExplanationResult] = useState('');
     const [isExplaining, setIsExplaining] = useState(false);
+    const [cursorStyle, setCursorStyle] = useState('crosshair');
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -270,11 +271,13 @@ const PDFClipperApp = () => {
     };
 
     const handleMouseDown = (e) => {
-        if (mode === 'view') return;
+        e.preventDefault();
         const pos = getMousePos(e);
+        const isRightClick = e.button === 2;
+        const effectiveMode = isRightClick ? 'mask' : (mode === 'view' ? 'crop' : mode);
 
         // 既存の切り抜き範囲のリサイズ判定
-        if (cropRect.w > 0 && mode === 'crop') {
+        if (cropRect.w > 0 && !isRightClick) {
             const handle = getResizeHandle(pos, cropRect);
             if (handle) {
                 setInteractionState({ type: 'resize', target: 'crop', handle });
@@ -284,7 +287,7 @@ const PDFClipperApp = () => {
         }
 
         // 既存の白塗りのリサイズ判定
-        if (mode === 'mask') {
+        if (isRightClick || mode === 'mask') {
             for (let i = masks.length - 1; i >= 0; i--) {
                 const handle = getResizeHandle(pos, masks[i]);
                 if (handle) {
@@ -297,7 +300,7 @@ const PDFClipperApp = () => {
 
         // 新規作成
         setStartPos(pos);
-        if (mode === 'mask') {
+        if (effectiveMode === 'mask') {
             const newMask = { x: pos.x, y: pos.y, w: 0, h: 0 };
             setMasks([...masks, newMask]);
             setInteractionState({ type: 'create', target: 'mask', index: masks.length });
@@ -307,9 +310,37 @@ const PDFClipperApp = () => {
         }
     };
 
+
     const handleMouseMove = (e) => {
-        if (interactionState.type === 'none') return;
         const pos = getMousePos(e);
+
+        // カーソル変更（ドラッグ中でないとき）
+        if (interactionState.type === 'none') {
+            let newCursor = 'crosshair';
+            // 切り抜きハンドルチェック
+            if (cropRect.w > 0) {
+                const handle = getResizeHandle(pos, cropRect);
+                if (handle) {
+                    if (handle === 'nw' || handle === 'se') newCursor = 'nwse-resize';
+                    else if (handle === 'ne' || handle === 'sw') newCursor = 'nesw-resize';
+                    else if (handle === 'n' || handle === 's') newCursor = 'ns-resize';
+                    else if (handle === 'e' || handle === 'w') newCursor = 'ew-resize';
+                }
+            }
+            // 白塗りハンドルチェック
+            for (const m of masks) {
+                const handle = getResizeHandle(pos, m);
+                if (handle) {
+                    if (handle === 'nw' || handle === 'se') newCursor = 'nwse-resize';
+                    else if (handle === 'ne' || handle === 'sw') newCursor = 'nesw-resize';
+                    else if (handle === 'n' || handle === 's') newCursor = 'ns-resize';
+                    else if (handle === 'e' || handle === 'w') newCursor = 'ew-resize';
+                    break;
+                }
+            }
+            setCursorStyle(newCursor);
+            return;
+        }
 
         if (interactionState.type === 'resize') {
             const handle = interactionState.handle;
@@ -676,7 +707,7 @@ const PDFClipperApp = () => {
                     </div>
                     <div className="flex-1 p-2 space-y-1 overflow-y-auto">
                         <div className="text-[10px] font-bold text-gray-400 px-1 mb-2">ページプレビュー ({pageThumbnails.length})</div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 gap-2">
                             {pageThumbnails.map((thumb, i) => (
                                 <div key={i} onClick={() => { setSelectedFileIndex(thumb.fileIndex); setCurrentPage(thumb.pageNum); }} className={`cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${selectedFileIndex === thumb.fileIndex && currentPage === thumb.pageNum ? 'border-blue-500 shadow-lg' : 'border-transparent hover:border-gray-300'}`}>
                                     <img src={thumb.dataUrl} className="w-full h-auto" alt={`${thumb.fileName} P${thumb.pageNum}`} />
@@ -721,7 +752,7 @@ const PDFClipperApp = () => {
                     <div ref={containerRef} className="flex-1 overflow-auto p-8 flex justify-center no-scrollbar" onDragOver={handleDragOver} onDrop={handleDrop}>
                         {selectedFileIndex !== null && (
                             <div className="relative bg-white shadow-2xl mx-auto self-start ring-1 ring-black/5" style={{ transform: `rotate(${rotation}deg)` }}>
-                                <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} className={mode !== 'view' ? 'cursor-crosshair' : 'cursor-default'} />
+                                <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onContextMenu={(e) => e.preventDefault()} style={{ cursor: cursorStyle }} />
                                 <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ transform: `rotate(${-rotation}deg)` }}>
                                     {cropRect.w > 0 && <>
                                         <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34,197,94,0.15)" stroke="#22c55e" strokeWidth="2" />
