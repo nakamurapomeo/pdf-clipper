@@ -85,6 +85,9 @@ const PDFClipperApp = () => {
     const [explanationResult, setExplanationResult] = useState('');
     const [isExplaining, setIsExplaining] = useState(false);
     const [cursorStyle, setCursorStyle] = useState('crosshair');
+    const [isCombineMode, setIsCombineMode] = useState(false);
+    const [selectedClipIdsForCombine, setSelectedClipIdsForCombine] = useState([]);
+    const [combinationCanvas, setCombinationCanvas] = useState({ width: 0, height: 0, items: [] });
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -247,9 +250,42 @@ const PDFClipperApp = () => {
         return { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
     };
 
-    // リサイズハンドルの判定（四隅と四辺）
+    // マウスカーソル位置取得（canvas内のピクセル座標）
+    const getMousePixelPos = (e) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return { x: 0, y: 0 };
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        return {
+            x: (e.clientX - rect.left) * scaleX,
+            y: (e.clientY - rect.top) * scaleY
+        };
+    };
+
+    // リサイズハンドルの判定 (ピクセル単位)
+    const getResizeHandlePixel = (pos, rect) => {
+        const threshold = 10;
+        const { x, y, w, h } = rect;
+        const nearLeft = Math.abs(pos.x - x) < threshold;
+        const nearRight = Math.abs(pos.x - (x + w)) < threshold;
+        const nearTop = Math.abs(pos.y - y) < threshold;
+        const nearBottom = Math.abs(pos.y - (y + h)) < threshold;
+
+        if (nearTop && nearLeft) return 'nw';
+        if (nearTop && nearRight) return 'ne';
+        if (nearBottom && nearLeft) return 'sw';
+        if (nearBottom && nearRight) return 'se';
+        if (nearTop) return 'n';
+        if (nearBottom) return 's';
+        if (nearLeft) return 'w';
+        if (nearRight) return 'e';
+        return null;
+    };
+
+    // リサイズハンドルの判定（四隅と四辺） (正規化座標)
     const getResizeHandle = (pos, rect) => {
-        const threshold = 0.04; // 4%の範囲でハンドルを検出
+        const threshold = 0.05 / Math.max(0.2, zoomLevel); // ズームレベルに応じて閾値を調整
         const inX = pos.x >= rect.x - threshold && pos.x <= rect.x + rect.w + threshold;
         const inY = pos.y >= rect.y - threshold && pos.y <= rect.y + rect.h + threshold;
         if (!inX || !inY) return null;
@@ -272,6 +308,27 @@ const PDFClipperApp = () => {
 
     const handleMouseDown = (e) => {
         e.preventDefault();
+
+        if (isCombineMode) {
+            const pos = getMousePixelPos(e);
+            // 上にあるものから判定
+            const items = [...combinationCanvas.items].sort((a, b) => b.zIndex - a.zIndex);
+            for (const item of items) {
+                const handle = getResizeHandlePixel(pos, item);
+                if (handle) {
+                    setInteractionState({ type: 'resize_combine', target: item.id, handle });
+                    setStartPos(pos);
+                    return;
+                }
+                if (pos.x >= item.x && pos.x <= item.x + item.w && pos.y >= item.y && pos.y <= item.y + item.h) {
+                    setInteractionState({ type: 'move_combine', target: item.id });
+                    setStartPos(pos);
+                    return;
+                }
+            }
+            return;
+        }
+
         const pos = getMousePos(e);
         const isRightClick = e.button === 2;
         const effectiveMode = isRightClick ? 'mask' : (mode === 'view' ? 'crop' : mode);
@@ -312,6 +369,60 @@ const PDFClipperApp = () => {
 
 
     const handleMouseMove = (e) => {
+        if (isCombineMode) {
+            const pos = getMousePixelPos(e);
+
+            // カーソル変更
+            if (interactionState.type === 'none') {
+                let newCursor = 'default';
+                const items = [...combinationCanvas.items].sort((a, b) => b.zIndex - a.zIndex);
+                for (const item of items) {
+                    const handle = getResizeHandlePixel(pos, item);
+                    if (handle) {
+                        if (handle === 'nw' || handle === 'se') newCursor = 'nwse-resize';
+                        else if (handle === 'ne' || handle === 'sw') newCursor = 'nesw-resize';
+                        else if (handle === 'n' || handle === 's') newCursor = 'ns-resize';
+                        else if (handle === 'e' || handle === 'w') newCursor = 'ew-resize';
+                        break;
+                    }
+                    if (pos.x >= item.x && pos.x <= item.x + item.w && pos.y >= item.y && pos.y <= item.y + item.h) {
+                        newCursor = 'move';
+                        break;
+                    }
+                }
+                setCursorStyle(newCursor);
+            }
+
+            if (interactionState.type === 'move_combine') {
+                const dx = pos.x - startPos.x;
+                const dy = pos.y - startPos.y;
+                setCombinationCanvas(prev => ({
+                    ...prev,
+                    items: prev.items.map(it => it.id === interactionState.target ? { ...it, x: it.x + dx, y: it.y + dy } : it)
+                }));
+                setStartPos(pos);
+            } else if (interactionState.type === 'resize_combine') {
+                const handle = interactionState.handle;
+                const dx = pos.x - startPos.x;
+                const dy = pos.y - startPos.y;
+
+                setCombinationCanvas(prev => ({
+                    ...prev,
+                    items: prev.items.map(it => {
+                        if (it.id !== interactionState.target) return it;
+                        let { x, y, w, h } = it;
+                        if (handle.includes('w')) { w -= dx; x += dx; }
+                        if (handle.includes('e')) { w += dx; }
+                        if (handle.includes('n')) { h -= dy; y += dy; }
+                        if (handle.includes('s')) { h += dy; }
+                        return { ...it, x, y, w: Math.max(10, w), h: Math.max(10, h) };
+                    })
+                }));
+                setStartPos(pos);
+            }
+            return;
+        }
+
         const pos = getMousePos(e);
 
         // カーソル変更（ドラッグ中でないとき）
@@ -355,19 +466,29 @@ const PDFClipperApp = () => {
 
             if (interactionState.target === 'crop') {
                 setCropRect(updateRect(cropRect));
-            } else {
+            } else if (interactionState.target === 'mask') {
+                const idx = interactionState.index;
                 const newMasks = [...masks];
-                newMasks[interactionState.index] = updateRect(masks[interactionState.index]);
+                newMasks[idx] = updateRect(newMasks[idx]);
                 setMasks(newMasks);
             }
-        } else {
-            const rect = { x: Math.min(startPos.x, pos.x), y: Math.min(startPos.y, pos.y), w: Math.abs(pos.x - startPos.x), h: Math.abs(pos.y - startPos.y) };
-            if (interactionState.target === 'mask') {
-                const newMasks = [...masks];
-                newMasks[interactionState.index] = rect;
-                setMasks(newMasks);
-            } else {
+        } else if (interactionState.type === 'create') {
+            const w = pos.x - startPos.x;
+            const h = pos.y - startPos.y;
+            const rect = {
+                x: w < 0 ? pos.x : startPos.x,
+                y: h < 0 ? pos.y : startPos.y,
+                w: Math.abs(w),
+                h: Math.abs(h)
+            };
+
+            if (interactionState.target === 'crop') {
                 setCropRect(rect);
+            } else if (interactionState.target === 'mask') {
+                const idx = interactionState.index;
+                const newMasks = [...masks];
+                newMasks[idx] = rect;
+                setMasks(newMasks);
             }
         }
     };
@@ -431,6 +552,134 @@ const PDFClipperApp = () => {
         setMasks([]);
         // 自動AI解析を実行
         setTimeout(() => analyzeTitleWithAI(newClipId), 100);
+    };
+
+    // クリップ画像をキャンバスに読み込んで再編集
+    const loadClipToCanvas = (clipId) => {
+        const clip = clips.find(c => c.id === clipId);
+        if (!clip) return;
+        const img = new Image();
+        img.onload = () => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            // PDFモードを解除してクリップ編集モードに
+            setSelectedFileIndex(-1); // 特殊なインデックスでクリップ編集中を示す
+            setEditingClipId(clipId);
+            setCropRect({ x: 0, y: 0, w: 0, h: 0 });
+            setMasks([]);
+            setRotation(0);
+        };
+        img.src = clip.dataUrl;
+    };
+
+    // 編集中のクリップを保存（上書き）
+    const saveEditedClip = () => {
+        if (!editingClipId) return;
+        const canvas = canvasRef.current;
+        const offscreen = document.createElement('canvas');
+        const ctx = offscreen.getContext('2d');
+        if (cropRect.w > 0) {
+            const x = cropRect.x * canvas.width, y = cropRect.y * canvas.height, w = cropRect.w * canvas.width, h = cropRect.h * canvas.height;
+            offscreen.width = w; offscreen.height = h;
+            ctx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
+        } else {
+            offscreen.width = canvas.width;
+            offscreen.height = canvas.height;
+            ctx.drawImage(canvas, 0, 0);
+        }
+        // 白塗りを適用
+        ctx.fillStyle = 'white';
+        for (const mask of masks) {
+            const mx = cropRect.w > 0 ? (mask.x - cropRect.x) * canvas.width : mask.x * canvas.width;
+            const my = cropRect.w > 0 ? (mask.y - cropRect.y) * canvas.height : mask.y * canvas.height;
+            const mw = mask.w * canvas.width;
+            const mh = mask.h * canvas.height;
+            ctx.fillRect(mx, my, mw, mh);
+        }
+        const dataUrl = offscreen.toDataURL('image/jpeg');
+        setClips(prev => prev.map(c => c.id === editingClipId ? { ...c, dataUrl, aspectRatio: offscreen.width / offscreen.height } : c));
+        setEditingClipId(null);
+        setSelectedFileIndex(null);
+        setCropRect({ x: 0, y: 0, w: 0, h: 0 });
+        setMasks([]);
+    };
+
+    // クリップ選択トグル
+    const toggleClipSelection = (id) => {
+        setSelectedClipIdsForCombine(prev =>
+            prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+        );
+    };
+
+    // 結合モード開始
+    const startCombineMode = () => {
+        if (selectedClipIdsForCombine.length < 2) {
+            alert("結合するには2つ以上のクリップを選択してください。");
+            return;
+        }
+
+        const targets = clips.filter(c => selectedClipIdsForCombine.includes(c.id));
+
+        Promise.all(targets.map(c => new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => resolve({ w: img.width, h: img.height });
+            img.src = c.dataUrl;
+        }))).then(sizes => {
+            let currentX = 50;
+            const newItems = targets.map((clip, i) => {
+                const { w, h } = sizes[i];
+                // 少し縮小して配置（大きすぎると扱いづらいため）
+                const scale = Math.min(1, 600 / w);
+                const displayW = w * scale;
+                const displayH = h * scale;
+
+                const item = { id: clip.id, x: currentX, y: 50, w: displayW, h: displayH, dataUrl: clip.dataUrl, zIndex: i };
+                currentX += displayW + 20;
+                return item;
+            });
+
+            const maxH = Math.max(...newItems.map(i => i.h));
+            const totalW = currentX + 50;
+
+            // キャンバス設定用の状態が必要（useStateに追加が必要だが、useRefで管理するか既存のstateでやるか）
+            // ここでは簡易的にcombinationCanvas stateを使用（宣言済み）
+            setCombinationCanvas({ width: Math.max(1200, totalW), height: Math.max(1000, maxH + 400), items: newItems });
+            setIsCombineMode(true);
+            setEditingClipId('combine'); // UI表示用
+            setSelectedFileIndex(-1);
+            setCropRect({ x: 0, y: 0, w: 0, h: 0 });
+            setMasks([]);
+            setRotation(0);
+        });
+    };
+
+    // 結合保存
+    const saveCombinedClip = () => {
+        if (!isCombineMode) return;
+        const canvas = canvasRef.current;
+        const dataUrl = canvas.toDataURL('image/jpeg');
+        // 新しいクリップとして追加
+        const { date, newspaper } = getNextDateNewspaper();
+        const newClip = {
+            id: Date.now(),
+            dataUrl,
+            title: '結合クリップ',
+            scalePercent: 100,
+            aspectRatio: canvas.width / canvas.height,
+            date,
+            newspaper
+        };
+        setClips(prev => [...prev, newClip]);
+
+        setIsCombineMode(false);
+        setEditingClipId(null);
+        setSelectedFileIndex(null);
+        setSelectedClipIdsForCombine([]);
+        setCombinationCanvas({ width: 0, height: 0, items: [] });
     };
 
     // 再割り当て: カウンターに基づいてすべてのクリップの日付・新聞を再設定
@@ -719,36 +968,52 @@ const PDFClipperApp = () => {
                     </div>
                 </div>
                 <div className="flex-1 flex flex-col bg-gray-200 relative min-w-0">
-                    <div className="h-12 bg-white border-b flex items-center justify-between px-4">
-                        <div className="flex gap-1">
-                            <button onClick={() => setMode('crop')} className={`p-2 rounded-lg transition-all ${mode === 'crop' ? 'bg-green-100 text-green-600 shadow-inner' : 'hover:bg-gray-100'}`}><Scissors size={18} /></button>
-                            <button onClick={() => setMode('mask')} className={`p-2 rounded-lg transition-all ${mode === 'mask' ? 'bg-red-100 text-red-600 shadow-inner' : 'hover:bg-gray-100'}`}><Eraser size={18} /></button>
-                            <div className="w-px h-6 bg-gray-200 mx-2"></div>
-                            <div className="flex items-center gap-1 bg-gray-50 px-2 rounded-lg">
-                                <button onClick={() => setRotation(r => r - 0.1)} className="p-1 hover:bg-gray-200 rounded text-[10px] font-bold">-0.1</button>
-                                <span className="text-[10px] w-10 text-center font-mono">{rotation.toFixed(1)}°</span>
-                                <button onClick={() => setRotation(r => r + 0.1)} className="p-1 hover:bg-gray-200 rounded text-[10px] font-bold">+0.1</button>
+                    {editingClipId ? (
+                        <div className="h-12 bg-orange-50 border-b flex items-center justify-between px-4">
+                            <div className="font-bold text-orange-600 flex items-center gap-2">
+                                <Edit3 size={18} /> クリップ編集中
                             </div>
-                            <div className="w-px h-6 bg-gray-200 mx-2"></div>
-                            <div className="flex items-center gap-1 bg-gray-50 px-2 rounded-lg">
-                                <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} className="hover:text-blue-600 transition-colors"><Minus size={14} /></button>
-                                <span className="text-[10px] font-bold w-10 text-center">{Math.round(zoomLevel * 100)}%</span>
-                                <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))} className="hover:text-blue-600 transition-colors"><Plus size={14} /></button>
+                            <div className="flex gap-1">
+                                <button onClick={() => setMode('crop')} className={`p-2 rounded-lg transition-all ${mode === 'crop' ? 'bg-green-100 text-green-600 shadow-inner' : 'hover:bg-gray-100'}`}><Scissors size={18} /></button>
+                                <button onClick={() => setMode('mask')} className={`p-2 rounded-lg transition-all ${mode === 'mask' ? 'bg-red-100 text-red-600 shadow-inner' : 'hover:bg-gray-100'}`}><Eraser size={18} /></button>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => { setEditingClipId(null); setSelectedFileIndex(null); if (isCombineMode) { setIsCombineMode(false); setSelectedClipIdsForCombine([]); setCombinationCanvas({ width: 0, height: 0, items: [] }); } }} className="px-4 py-1.5 text-gray-500 hover:bg-gray-100 rounded-lg text-sm font-bold transition-all">キャンセル</button>
+                                <button onClick={isCombineMode ? saveCombinedClip : saveEditedClip} className="px-4 py-1.5 bg-orange-500 text-white rounded-lg text-sm font-bold hover:bg-orange-600 shadow-sm transition-all flex items-center gap-2"><Save size={16} />保存</button>
                             </div>
                         </div>
-                        <div className="flex gap-2">
-                            <span className="text-[10px] font-medium text-gray-400 flex items-center">P.{currentPage}/{files[selectedFileIndex]?.pageCount || 1}</span>
-                            <button onClick={() => { setCropRect({ x: 0, y: 0, w: 0, h: 0 }); setMasks([]); }} className="px-2 py-1 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-all">クリア</button>
-                            <button onClick={saveClip} className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition-all">追加</button>
-                            <div className="w-px h-6 bg-gray-200 mx-1"></div>
-                            <button onClick={() => setSettingsOpen(true)} className="p-1.5 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-all"><Settings size={16} /></button>
-                            <button onClick={handlePasteFromClipboard} className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-all"><Clipboard size={14} /><span>貼り付け</span></button>
-                            <label className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-blue-700 shadow-sm transition-all">
-                                <Upload size={14} /><span>PDF追加</span>
-                                <input type="file" multiple accept="application/pdf" className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
-                            </label>
+                    ) : (
+                        <div className="h-12 bg-white border-b flex items-center justify-between px-4">
+                            <div className="flex gap-1">
+                                <button onClick={() => setMode('crop')} className={`p-2 rounded-lg transition-all ${mode === 'crop' ? 'bg-green-100 text-green-600 shadow-inner' : 'hover:bg-gray-100'}`}><Scissors size={18} /></button>
+                                <button onClick={() => setMode('mask')} className={`p-2 rounded-lg transition-all ${mode === 'mask' ? 'bg-red-100 text-red-600 shadow-inner' : 'hover:bg-gray-100'}`}><Eraser size={18} /></button>
+                                <div className="w-px h-6 bg-gray-200 mx-2"></div>
+                                <div className="flex items-center gap-1 bg-gray-50 px-2 rounded-lg">
+                                    <button onClick={() => setRotation(r => r - 0.1)} className="p-1 hover:bg-gray-200 rounded text-[10px] font-bold">-0.1</button>
+                                    <span className="text-[10px] w-10 text-center font-mono">{rotation.toFixed(1)}°</span>
+                                    <button onClick={() => setRotation(r => r + 0.1)} className="p-1 hover:bg-gray-200 rounded text-[10px] font-bold">+0.1</button>
+                                </div>
+                                <div className="w-px h-6 bg-gray-200 mx-2"></div>
+                                <div className="flex items-center gap-1 bg-gray-50 px-2 rounded-lg">
+                                    <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} className="hover:text-blue-600 transition-colors"><Minus size={14} /></button>
+                                    <span className="text-[10px] font-bold w-10 text-center">{Math.round(zoomLevel * 100)}%</span>
+                                    <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))} className="hover:text-blue-600 transition-colors"><Plus size={14} /></button>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <span className="text-[10px] font-medium text-gray-400 flex items-center">P.{currentPage}/{files[selectedFileIndex]?.pageCount || 1}</span>
+                                <button onClick={() => { setCropRect({ x: 0, y: 0, w: 0, h: 0 }); setMasks([]); }} className="px-2 py-1 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-all">クリア</button>
+                                <button onClick={saveClip} className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition-all">追加</button>
+                                <div className="w-px h-6 bg-gray-200 mx-1"></div>
+                                <button onClick={() => setSettingsOpen(true)} className="p-1.5 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-all"><Settings size={16} /></button>
+                                <button onClick={handlePasteFromClipboard} className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-all"><Clipboard size={14} /><span>貼り付け</span></button>
+                                <label className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-blue-700 shadow-sm transition-all">
+                                    <Upload size={14} /><span>PDF追加</span>
+                                    <input type="file" multiple accept="application/pdf" className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
+                                </label>
+                            </div>
                         </div>
-                    </div>
+                    )}
                     <div ref={containerRef} className="flex-1 overflow-auto p-8 flex justify-center no-scrollbar" onDragOver={handleDragOver} onDrop={handleDrop}>
                         {selectedFileIndex !== null && (
                             <div className="relative bg-white shadow-2xl mx-auto self-start ring-1 ring-black/5" style={{ transform: `rotate(${rotation}deg)` }}>
@@ -776,6 +1041,15 @@ const PDFClipperApp = () => {
                 </div>
                 <div className={`${rightSidebarOpen ? 'w-72 border-l' : 'w-0'} bg-white transition-all overflow-y-auto flex flex-col`} onDragOver={handleDragOver} onDrop={handleDrop}>
                     <div className="p-4 bg-gray-50 border-b font-extrabold text-sm flex justify-between">結合リスト <span className="text-blue-600">{clips.length}</span></div>
+                    <div className="p-3 bg-white border-b flex justify-between items-center">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <div className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedClipIdsForCombine.length > 0 ? 'bg-blue-600' : 'bg-gray-300'}`}>
+                                <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${selectedClipIdsForCombine.length > 0 ? 'translate-x-4' : ''}`}></div>
+                            </div>
+                            <span className="text-xs font-bold text-gray-600">結合選択</span>
+                        </label>
+                        <button onClick={startCombineMode} disabled={selectedClipIdsForCombine.length < 2} className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 disabled:opacity-50 transition-all">結合編集</button>
+                    </div>
                     <div className="p-3 bg-gray-50 border-b space-y-2">
                         <div className="grid grid-cols-2 gap-2">
                             <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="py-1.5 bg-purple-600 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">AI解析</button>
@@ -797,8 +1071,11 @@ const PDFClipperApp = () => {
                     </div>
                     <div className="flex-1 p-3 space-y-4">
                         {clips.map((c, idx) => (
-                            <div key={c.id} draggable onDragStart={() => setDraggedClipId(c.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { if (e.dataTransfer.files.length > 0) { handleFileUpload(e.dataTransfer.files); return; } if (draggedClipId && draggedClipId !== c.id) { const fromIdx = clips.findIndex(x => x.id === draggedClipId); const toIdx = idx; const newClips = [...clips]; const [moved] = newClips.splice(fromIdx, 1); newClips.splice(toIdx, 0, moved); setClips(newClips); } setDraggedClipId(null); }} className={`p-3 border rounded-xl bg-white shadow-sm space-y-3 hover:shadow-md transition-shadow ring-1 ring-black/5 cursor-grab ${draggedClipId === c.id ? 'opacity-50' : ''}`}>
-                                <div className="relative aspect-video bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center cursor-pointer" onClick={() => setEditingClipId(c.id)}>
+                            <div key={c.id} draggable onDragStart={() => setDraggedClipId(c.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { if (e.dataTransfer.files.length > 0) { handleFileUpload(e.dataTransfer.files); return; } if (draggedClipId && draggedClipId !== c.id) { const fromIdx = clips.findIndex(x => x.id === draggedClipId); const toIdx = idx; const newClips = [...clips]; const [moved] = newClips.splice(fromIdx, 1); newClips.splice(toIdx, 0, moved); setClips(newClips); } setDraggedClipId(null); }} className={`p-3 border rounded-xl bg-white shadow-sm space-y-3 hover:shadow-md transition-shadow ring-1 ring-black/5 cursor-grab ${draggedClipId === c.id ? 'opacity-50' : ''} ${selectedClipIdsForCombine.includes(c.id) ? 'ring-2 ring-blue-500 bg-blue-50' : ''}`}>
+                                <div className="relative aspect-video bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center cursor-pointer" onClick={() => loadClipToCanvas(c.id)}>
+                                    <div className="absolute top-2 left-2 z-10" onClick={(e) => e.stopPropagation()}>
+                                        <input type="checkbox" checked={selectedClipIdsForCombine.includes(c.id)} onChange={() => toggleClipSelection(c.id)} className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shadow-sm" />
+                                    </div>
                                     <img src={c.dataUrl} className="max-w-full max-h-full object-contain" alt="clip" />
                                     <button onClick={(e) => { e.stopPropagation(); setClips(clips.filter(x => x.id !== c.id)); }} className="absolute top-1 right-1 p-1 bg-white/80 rounded-full text-red-500 hover:bg-red-50 shadow-sm"><X size={14} /></button>
                                 </div>
@@ -855,52 +1132,7 @@ const PDFClipperApp = () => {
                     </div>
                 </div>
             )}
-            {editingClipId && (() => {
-                const clip = clips.find(c => c.id === editingClipId);
-                if (!clip) return null;
-                return (
-                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 z-50" onClick={() => setEditingClipId(null)}>
-                        <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                            <div className="p-4 border-b flex justify-between items-center">
-                                <h3 className="font-bold text-lg">クリップ編集</h3>
-                                <button onClick={() => setEditingClipId(null)} className="p-2 hover:bg-gray-100 rounded-full"><X size={20} /></button>
-                            </div>
-                            <div className="p-6 flex flex-col md:flex-row gap-6">
-                                <div className="flex-1 bg-gray-100 rounded-xl p-4 flex items-center justify-center">
-                                    <img src={clip.dataUrl} className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-lg" alt="clip" />
-                                </div>
-                                <div className="w-full md:w-72 space-y-4">
-                                    <div>
-                                        <label className="text-xs font-bold text-gray-500 block mb-1">タイトル</label>
-                                        <input value={clip.title} onChange={(e) => setClips(clips.map(x => x.id === clip.id ? { ...x, title: e.target.value } : x))} className="w-full text-sm border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-blue-100" placeholder="記事タイトル..." />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-gray-500 block mb-1">日付</label>
-                                        <select value={clip.date || formatDateKey(new Date())} onChange={(e) => setClips(clips.map(x => x.id === clip.id ? { ...x, date: e.target.value } : x))} className="w-full text-sm border rounded-lg px-3 py-2 outline-none bg-white">
-                                            {[0, 1, 2, 3, 4].map(i => { const d = new Date(Date.now() - i * 86400000); const key = formatDateKey(d); return <option key={key} value={key}>{formatShortDate(d)}</option>; })}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-gray-500 block mb-1">新聞</label>
-                                        <select value={clip.newspaper || 'agri'} onChange={(e) => setClips(clips.map(x => x.id === clip.id ? { ...x, newspaper: e.target.value } : x))} className="w-full text-sm border rounded-lg px-3 py-2 outline-none bg-white">
-                                            {NEWSPAPERS.map(np => <option key={np.key} value={np.key}>{np.label}</option>)}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-gray-500 block mb-1">サイズ: {clip.scalePercent}%</label>
-                                        <input type="range" min="10" max="100" value={clip.scalePercent} onChange={(e) => setClips(clips.map(x => x.id === clip.id ? { ...x, scalePercent: parseInt(e.target.value) } : x))} className="w-full h-2 bg-gray-200 appearance-none rounded-full cursor-pointer accent-blue-500" />
-                                    </div>
-                                    <button onClick={() => analyzeTitleWithAI(clip.id)} className="w-full py-2 bg-purple-600 text-white rounded-lg text-sm font-bold hover:bg-purple-700 transition-all flex items-center justify-center gap-2">
-                                        {clip.isAnalyzing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                                        AI解析
-                                    </button>
-                                    <button onClick={() => { setClips(clips.filter(x => x.id !== clip.id)); setEditingClipId(null); }} className="w-full py-2 bg-red-500 text-white rounded-lg text-sm font-bold hover:bg-red-600 transition-all">削除</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-            })()}
+
         </div>
     );
 };
