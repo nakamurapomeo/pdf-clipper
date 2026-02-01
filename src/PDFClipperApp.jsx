@@ -40,14 +40,10 @@ const copyToClipboardFallback = (text) => {
     return success;
 };
 
-const AI_MODELS = [
+const DEFAULT_MODELS = [
     { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash' },
     { id: 'google/gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash' },
-    { id: 'google/gemini-2.5-pro-preview-03-25', name: 'Gemini 2.5 Pro' },
     { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
-    { id: 'anthropic/claude-3-haiku', name: 'Claude 3 Haiku' },
-    { id: 'openai/gpt-4o', name: 'GPT-4o' },
-    { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini' },
 ];
 const NEWSPAPERS = [
     { key: 'agri', label: '日本農業新聞', shortLabel: '農業' },
@@ -76,7 +72,8 @@ const PDFClipperApp = () => {
     const [previewUrl, setPreviewUrl] = useState(null);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [openRouterApiKey, setOpenRouterApiKey] = useState('');
-    const [selectedModel, setSelectedModel] = useState(AI_MODELS[0].id);
+    const [selectedModel, setSelectedModel] = useState(DEFAULT_MODELS[0].id);
+    const [availableModels, setAvailableModels] = useState(DEFAULT_MODELS);
     const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
     const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
     const [interactionState, setInteractionState] = useState({ type: 'none', target: null, index: null });
@@ -98,6 +95,21 @@ const PDFClipperApp = () => {
         if (storedModel) setSelectedModel(storedModel);
         const storedPrompt = localStorage.getItem('explanationPrompt');
         if (storedPrompt) setExplanationPrompt(storedPrompt);
+
+        // OpenRouterからモデルリストを取得
+        fetch('https://openrouter.ai/api/v1/models')
+            .then(res => res.json())
+            .then(data => {
+                if (data.data && Array.isArray(data.data)) {
+                    // 画像入力対応モデルのみフィルタリング
+                    const visionModels = data.data
+                        .filter(m => m.architecture?.modality?.includes('image') || m.id.includes('vision') || m.id.includes('gemini') || m.id.includes('gpt-4o') || m.id.includes('claude-3'))
+                        .map(m => ({ id: m.id, name: m.name || m.id }))
+                        .sort((a, b) => a.name.localeCompare(b.name));
+                    if (visionModels.length > 0) setAvailableModels(visionModels);
+                }
+            })
+            .catch(() => { /* エラー時はデフォルトを使用 */ });
     }, []);
 
     const handleFileUpload = async (uploadedFiles) => {
@@ -799,7 +811,7 @@ const PDFClipperApp = () => {
                             <div>
                                 <label className="text-xs font-bold text-gray-400 mb-2 block uppercase tracking-wider">AIモデル</label>
                                 <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl text-sm outline-none">
-                                    {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                    {availableModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                                 </select>
                             </div>
                             <div>
