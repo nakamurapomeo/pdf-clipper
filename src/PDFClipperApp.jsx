@@ -411,13 +411,10 @@ const PDFClipperApp = () => {
                     items: prev.items.map(it => {
                         if (it.id !== interactionState.target) return it;
                         let { x, y, w, h } = it;
-                        const aspect = w / h;
+                        const aspect = it.aspectRatio || (w / h);
 
-                        // 簡易的なアスペクト比維持リサイズ（対角線上の移動量などで計算すべきだが、ここではdx/dyの大きい方を採用する簡易実装）
-                        // 厳密にはハンドルごとに挙動を変える必要がある
-
+                        // アスペクト比維持リサイズ
                         if (handle === 'se') {
-                            // 右下: 幅と高さの大きい変化に合わせて拡大縮小
                             if (Math.abs(dx) > Math.abs(dy)) {
                                 w += dx;
                                 h = w / aspect;
@@ -426,29 +423,36 @@ const PDFClipperApp = () => {
                                 w = h * aspect;
                             }
                         } else if (handle === 'sw') {
-                            // 左下
                             w -= dx; x += dx;
                             h = w / aspect;
                         } else if (handle === 'ne') {
-                            // 右上
                             w += dx;
                             h = w / aspect;
-                            y += (it.h - h); // 底辺固定と考えた場合のY補正だとずれるので、頂点移動量から計算
-                            // 実際は右上固定で高さが変わるので、Yも動かす必要がある
-                            // 単純化: 右方向へのドラッグだけ考える
+                            y += (it.h - h);
                         } else if (handle === 'nw') {
-                            // 左上
                             w -= dx; x += dx;
                             h = w / aspect;
                             y += (it.h - h);
                         } else if (handle === 'e') {
-                            w += dx; h = w / aspect;
+                            w += dx;
+                            h = w / aspect;
+                            y += (it.h - h) / 2; // 中心基準で拡大縮小する場合
+                            // いや、単に高さを変えるなら y はそのままだと上が固定される。
+                            // 中心基準にするなら `y -= (h - it.h) / 2`
+                            // ここではシンプルに上固定にするか、中心にするか。
+                            // PowerPoint等は中心基準が多いが、ここでは上固定（y変更なし）だと不自然（横だけ伸びて縦が伸びる時下に伸びる）
+                            // しかしそうすると「右」に引っ張ったのに「下」にも伸びるという挙動になる。
+                            // これはアスペクト比固定の宿命。
                         } else if (handle === 'w') {
-                            w -= dx; x += dx; h = w / aspect;
+                            w -= dx; x += dx;
+                            h = w / aspect;
+                            y += (it.h - h) / 2;
                         } else if (handle === 's') {
                             h += dy; w = h * aspect;
+                            x += (it.w - w) / 2;
                         } else if (handle === 'n') {
                             h -= dy; y += dy; w = h * aspect;
+                            x += (it.w - w) / 2;
                         }
 
                         return { ...it, x, y, w: Math.max(10, w), h: Math.max(10, h) };
@@ -673,7 +677,7 @@ const PDFClipperApp = () => {
                 const displayW = w * scale;
                 const displayH = h * scale;
 
-                const item = { id: clip.id, x: currentX, y: 50, w: displayW, h: displayH, dataUrl: clip.dataUrl, zIndex: i };
+                const item = { id: clip.id, x: currentX, y: 50, w: displayW, h: displayH, dataUrl: clip.dataUrl, zIndex: i, aspectRatio: displayW / displayH };
                 currentX += displayW + 20;
                 return item;
             });
