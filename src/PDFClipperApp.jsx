@@ -359,13 +359,16 @@ const PDFClipperApp = () => {
     const createPdfBlob = async (targetClips = clips) => {
         if (!window.PDFLib || targetClips.length === 0) return null;
         const doc = await window.PDFLib.PDFDocument.create();
+        const margin = 20;
         for (const clip of targetClips) {
             const img = await doc.embedJpg(clip.dataUrl);
-            const page = doc.addPage([595.28, 841.89]);
-            const margin = 20;
-            const availW = 595.28 - margin * 2, availH = 841.89 - margin * 2;
-            const scale = Math.min(availW / img.width, availH / img.height) * (clip.scalePercent / 100);
-            page.drawImage(img, { x: (595.28 - img.width * scale) / 2, y: (841.89 - img.height * scale) / 2, width: img.width * scale, height: img.height * scale });
+            const scale = clip.scalePercent / 100;
+            const imgW = img.width * scale;
+            const imgH = img.height * scale;
+            const pageW = imgW + margin * 2;
+            const pageH = imgH + margin * 2;
+            const page = doc.addPage([pageW, pageH]);
+            page.drawImage(img, { x: margin, y: margin, width: imgW, height: imgH });
         }
         return new Blob([await doc.save()], { type: 'application/pdf' });
     };
@@ -572,8 +575,8 @@ const PDFClipperApp = () => {
                             <div className="relative bg-white shadow-2xl mx-auto self-start ring-1 ring-black/5" style={{ transform: `rotate(${rotation}deg)` }}>
                                 <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} className={mode !== 'view' ? 'cursor-crosshair' : 'cursor-default'} />
                                 <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                                    {cropRect.w > 0 && <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34,197,94,0.1)" stroke="#22c55e" strokeWidth="2" strokeDasharray="4" />}
-                                    {masks.map((m, i) => <rect key={i} x={`${m.x * 100}%`} y={`${m.y * 100}%`} width={`${m.w * 100}%`} height={`${m.h * 100}%`} fill="white" stroke="#eee" />)}
+                                    {cropRect.w > 0 && <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34,197,94,0.15)" stroke="#22c55e" strokeWidth="2" rx="4" />}
+                                    {masks.map((m, i) => <rect key={i} x={`${m.x * 100}%`} y={`${m.y * 100}%`} width={`${m.w * 100}%`} height={`${m.h * 100}%`} fill="rgba(239,68,68,0.3)" rx="4" />)}
                                 </svg>
                             </div>
                         )}
@@ -586,11 +589,21 @@ const PDFClipperApp = () => {
                         </div>
                     </div>
                 </div>
-                <div className={`${rightSidebarOpen ? 'w-72 border-l' : 'w-0'} bg-white transition-all overflow-y-auto flex flex-col`}>
+                <div className={`${rightSidebarOpen ? 'w-72 border-l' : 'w-0'} bg-white transition-all overflow-y-auto flex flex-col`} onDragOver={handleDragOver} onDrop={handleDrop}>
                     <div className="p-4 bg-gray-50 border-b font-extrabold text-sm flex justify-between">結合リスト <span className="text-blue-600">{clips.length}</span></div>
+                    <div className="p-3 bg-gray-50 border-b space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                            <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="py-1.5 bg-purple-600 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">AI解析</button>
+                            <button onClick={reassignAllClips} disabled={clips.length === 0} className="py-1.5 bg-amber-500 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">再割り当て</button>
+                            <button onClick={copyShareText} disabled={clips.length === 0} className="py-1.5 bg-green-600 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">コピー</button>
+                            <button onClick={downloadDailyPDFs} disabled={clips.length === 0} className="py-1.5 bg-orange-600 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">日別PDF</button>
+                            <button onClick={copyAndOpenCybozu} disabled={clips.length === 0} className="py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">Cybozu</button>
+                            <button onClick={downloadPDF} disabled={clips.length === 0} className="py-1.5 bg-gray-800 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">PDF出力</button>
+                        </div>
+                    </div>
                     <div className="flex-1 p-3 space-y-4">
                         {clips.map((c, idx) => (
-                            <div key={c.id} draggable onDragStart={() => setDraggedClipId(c.id)} onDragOver={(e) => e.preventDefault()} onDrop={() => { if (draggedClipId && draggedClipId !== c.id) { const fromIdx = clips.findIndex(x => x.id === draggedClipId); const toIdx = idx; const newClips = [...clips]; const [moved] = newClips.splice(fromIdx, 1); newClips.splice(toIdx, 0, moved); setClips(newClips); } setDraggedClipId(null); }} className={`p-3 border rounded-xl bg-white shadow-sm space-y-3 hover:shadow-md transition-shadow ring-1 ring-black/5 cursor-grab ${draggedClipId === c.id ? 'opacity-50' : ''}`}>
+                            <div key={c.id} draggable onDragStart={() => setDraggedClipId(c.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { if (e.dataTransfer.files.length > 0) { handleFileUpload(e.dataTransfer.files); return; } if (draggedClipId && draggedClipId !== c.id) { const fromIdx = clips.findIndex(x => x.id === draggedClipId); const toIdx = idx; const newClips = [...clips]; const [moved] = newClips.splice(fromIdx, 1); newClips.splice(toIdx, 0, moved); setClips(newClips); } setDraggedClipId(null); }} className={`p-3 border rounded-xl bg-white shadow-sm space-y-3 hover:shadow-md transition-shadow ring-1 ring-black/5 cursor-grab ${draggedClipId === c.id ? 'opacity-50' : ''}`}>
                                 <div className="relative aspect-video bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center">
                                     <img src={c.dataUrl} className="max-w-full max-h-full object-contain" alt="clip" />
                                     <button onClick={() => setClips(clips.filter(x => x.id !== c.id))} className="absolute top-1 right-1 p-1 bg-white/80 rounded-full text-red-500 hover:bg-red-50 shadow-sm"><X size={14} /></button>
@@ -618,15 +631,6 @@ const PDFClipperApp = () => {
                             </div>
                         ))}
                         {clips.length === 0 && <div className="text-center py-20 text-gray-300 text-xs italic">クリップを追加してください</div>}
-                    </div>
-                    <div className="p-4 bg-gray-50 border-t space-y-2">
-                        <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">すべてAI解析</button>
-                        <button onClick={reassignAllClips} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-yellow-500 to-amber-500 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">日付・新聞を再割り当て</button>
-                        <button onClick={copyShareText} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-green-600 to-teal-600 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">共有テキストをコピー</button>
-                        <button onClick={downloadDailyPDFs} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">日別PDFを出力</button>
-                        <div className="border-t my-2"></div>
-                        <button onClick={copyAndOpenCybozu} className="w-full py-2 bg-white border border-blue-600 text-blue-600 rounded-xl text-xs font-bold hover:bg-blue-50 transition-all active:scale-95">Cybozuへ投稿</button>
-                        <button onClick={downloadPDF} className="w-full py-2 bg-gray-800 text-white rounded-xl text-xs font-bold shadow-lg hover:bg-black transition-all active:scale-95">PDFをダウンロード</button>
                     </div>
                 </div>
             </div>
