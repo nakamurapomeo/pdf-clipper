@@ -220,7 +220,7 @@ const PDFClipperApp = () => {
 
     // リサイズハンドルの判定（四隅と四辺）
     const getResizeHandle = (pos, rect) => {
-        const threshold = 0.02; // 2%の範囲でハンドルを検出
+        const threshold = 0.04; // 4%の範囲でハンドルを検出
         const inX = pos.x >= rect.x - threshold && pos.x <= rect.x + rect.w + threshold;
         const inY = pos.y >= rect.y - threshold && pos.y <= rect.y + rect.h + threshold;
         if (!inX || !inY) return null;
@@ -648,8 +648,21 @@ const PDFClipperApp = () => {
                             <div className="relative bg-white shadow-2xl mx-auto self-start ring-1 ring-black/5" style={{ transform: `rotate(${rotation}deg)` }}>
                                 <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} className={mode !== 'view' ? 'cursor-crosshair' : 'cursor-default'} />
                                 <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                                    {cropRect.w > 0 && <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34,197,94,0.15)" stroke="#22c55e" strokeWidth="2" />}
-                                    {masks.map((m, i) => <rect key={i} x={`${m.x * 100}%`} y={`${m.y * 100}%`} width={`${m.w * 100}%`} height={`${m.h * 100}%`} fill="rgba(239,68,68,0.3)" />)}
+                                    {cropRect.w > 0 && <>
+                                        <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34,197,94,0.15)" stroke="#22c55e" strokeWidth="2" />
+                                        {/* リサイズハンドル（四隅） */}
+                                        <rect x={`calc(${cropRect.x * 100}% - 4px)`} y={`calc(${cropRect.y * 100}% - 4px)`} width="8" height="8" fill="#22c55e" />
+                                        <rect x={`calc(${(cropRect.x + cropRect.w) * 100}% - 4px)`} y={`calc(${cropRect.y * 100}% - 4px)`} width="8" height="8" fill="#22c55e" />
+                                        <rect x={`calc(${cropRect.x * 100}% - 4px)`} y={`calc(${(cropRect.y + cropRect.h) * 100}% - 4px)`} width="8" height="8" fill="#22c55e" />
+                                        <rect x={`calc(${(cropRect.x + cropRect.w) * 100}% - 4px)`} y={`calc(${(cropRect.y + cropRect.h) * 100}% - 4px)`} width="8" height="8" fill="#22c55e" />
+                                    </>}
+                                    {masks.map((m, i) => <React.Fragment key={i}>
+                                        <rect x={`${m.x * 100}%`} y={`${m.y * 100}%`} width={`${m.w * 100}%`} height={`${m.h * 100}%`} fill="rgba(239,68,68,0.3)" />
+                                        <rect x={`calc(${m.x * 100}% - 3px)`} y={`calc(${m.y * 100}% - 3px)`} width="6" height="6" fill="#ef4444" />
+                                        <rect x={`calc(${(m.x + m.w) * 100}% - 3px)`} y={`calc(${m.y * 100}% - 3px)`} width="6" height="6" fill="#ef4444" />
+                                        <rect x={`calc(${m.x * 100}% - 3px)`} y={`calc(${(m.y + m.h) * 100}% - 3px)`} width="6" height="6" fill="#ef4444" />
+                                        <rect x={`calc(${(m.x + m.w) * 100}% - 3px)`} y={`calc(${(m.y + m.h) * 100}% - 3px)`} width="6" height="6" fill="#ef4444" />
+                                    </React.Fragment>)}
                                 </svg>
                             </div>
                         )}
