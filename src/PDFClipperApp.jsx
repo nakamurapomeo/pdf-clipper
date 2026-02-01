@@ -206,6 +206,12 @@ const PDFClipperApp = () => {
 
     useEffect(() => { renderPage(); }, [renderPage]);
 
+    // ページ変更時に切り抜き・白塗りをクリア
+    useEffect(() => {
+        setCropRect({ x: 0, y: 0, w: 0, h: 0 });
+        setMasks([]);
+    }, [selectedFileIndex, currentPage]);
+
     const getMousePos = (e) => {
         const rect = canvasRef.current.getBoundingClientRect();
         return { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
@@ -313,7 +319,6 @@ const PDFClipperApp = () => {
             return clip;
         });
         setClips(newClips);
-        alert('日付・新聞種別を再割り当てしました。');
     };
 
     const analyzeTitleWithAI = async (id) => {
@@ -504,12 +509,11 @@ const PDFClipperApp = () => {
         const text = generateShareText();
         if (!text) return;
         copyToClipboardFallback(text);
-        alert('テキストをコピーしました。Cybozuを開きます。');
         window.open('https://op7oo.cybozu.com/o/ag.cgi?page=MyFolderMessageView&mid=455345&mdbid=10', '_blank');
     };
 
     return (
-        <div className="flex flex-col h-screen bg-gray-50 text-gray-800 font-sans">
+        <div className="flex flex-col h-screen bg-gray-50 text-gray-800 font-sans" onDragOver={handleDragOver} onDrop={handleDrop}>
             <header className="h-14 bg-white border-b shadow-sm flex items-center justify-between px-4 z-10">
                 <div className="flex items-center gap-2 text-blue-600"><Scissors size={24} /> <h1 className="font-extrabold text-xl tracking-tight">PDF Clipper</h1></div>
                 <div className="flex gap-2">
@@ -575,8 +579,8 @@ const PDFClipperApp = () => {
                             <div className="relative bg-white shadow-2xl mx-auto self-start ring-1 ring-black/5" style={{ transform: `rotate(${rotation}deg)` }}>
                                 <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} className={mode !== 'view' ? 'cursor-crosshair' : 'cursor-default'} />
                                 <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                                    {cropRect.w > 0 && <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34,197,94,0.15)" stroke="#22c55e" strokeWidth="2" rx="4" />}
-                                    {masks.map((m, i) => <rect key={i} x={`${m.x * 100}%`} y={`${m.y * 100}%`} width={`${m.w * 100}%`} height={`${m.h * 100}%`} fill="rgba(239,68,68,0.3)" rx="4" />)}
+                                    {cropRect.w > 0 && <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34,197,94,0.15)" stroke="#22c55e" strokeWidth="2" />}
+                                    {masks.map((m, i) => <rect key={i} x={`${m.x * 100}%`} y={`${m.y * 100}%`} width={`${m.w * 100}%`} height={`${m.h * 100}%`} fill="rgba(239,68,68,0.3)" />)}
                                 </svg>
                             </div>
                         )}
