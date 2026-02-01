@@ -666,7 +666,7 @@ const PDFClipperApp = () => {
                         {selectedFileIndex !== null && (
                             <div className="relative bg-white shadow-2xl mx-auto self-start ring-1 ring-black/5" style={{ transform: `rotate(${rotation}deg)` }}>
                                 <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} className={mode !== 'view' ? 'cursor-crosshair' : 'cursor-default'} />
-                                <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                                <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ transform: `rotate(${-rotation}deg)` }}>
                                     {cropRect.w > 0 && <>
                                         <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34,197,94,0.15)" stroke="#22c55e" strokeWidth="2" />
                                         {/* リサイズハンドル（四隅） */}
