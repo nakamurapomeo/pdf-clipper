@@ -82,6 +82,9 @@ const PDFClipperApp = () => {
     const [pageThumbnails, setPageThumbnails] = useState([]);
     const [draggedClipId, setDraggedClipId] = useState(null);
     const [editingClipId, setEditingClipId] = useState(null);
+    const [explanationPrompt, setExplanationPrompt] = useState('この新聞記事の内容を日本語でわかりやすく解説してください。記事の要点、背景、重要なポイントを簡潔にまとめてください。');
+    const [explanationResult, setExplanationResult] = useState('');
+    const [isExplaining, setIsExplaining] = useState(false);
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -89,6 +92,10 @@ const PDFClipperApp = () => {
     useEffect(() => {
         const storedKey = localStorage.getItem('openRouterApiKey');
         if (storedKey) setOpenRouterApiKey(storedKey);
+        const storedModel = localStorage.getItem('selectedModel');
+        if (storedModel) setSelectedModel(storedModel);
+        const storedPrompt = localStorage.getItem('explanationPrompt');
+        if (storedPrompt) setExplanationPrompt(storedPrompt);
     }, []);
 
     const handleFileUpload = async (uploadedFiles) => {
@@ -442,6 +449,41 @@ const PDFClipperApp = () => {
 
     const analyzeAllTitles = async () => { for (const c of clips) await analyzeTitleWithAI(c.id); };
 
+    // 全クリップをAIで解説
+    const explainAllClips = async () => {
+        if (clips.length === 0) return;
+        if (!openRouterApiKey) { alert("設定からOpenRouter APIキーを入力してください。"); return; }
+        setIsExplaining(true);
+        setExplanationResult('');
+        try {
+            const imageContents = clips.map((c, i) => ({
+                type: 'image_url',
+                image_url: { url: c.dataUrl }
+            }));
+            const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${openRouterApiKey}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: selectedModel,
+                    messages: [{
+                        role: 'user',
+                        content: [
+                            { type: 'text', text: `以下は${clips.length}件の新聞記事の画像です。それぞれについて、${explanationPrompt}\n\n各記事を番号付きで解説してください。` },
+                            ...imageContents
+                        ]
+                    }]
+                })
+            });
+            const data = await res.json();
+            const text = data.choices?.[0]?.message?.content?.trim() || "解説を取得できませんでした";
+            setExplanationResult(text);
+        } catch (e) {
+            setExplanationResult(`エラー: ${e.message}`);
+        } finally {
+            setIsExplaining(false);
+        }
+    };
+
     const updateMatrixCount = (date, key, delta) => {
         const dKey = formatDateKey(date);
         setMatrixCounts(prev => {
@@ -696,8 +738,17 @@ const PDFClipperApp = () => {
                             <button onClick={copyShareText} disabled={clips.length === 0} className="py-1.5 bg-green-600 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">コピー</button>
                             <button onClick={downloadDailyPDFs} disabled={clips.length === 0} className="py-1.5 bg-orange-600 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">日別PDF</button>
                             <button onClick={copyAndOpenCybozu} disabled={clips.length === 0} className="py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">Cybozu</button>
-                            <button onClick={downloadPDF} disabled={clips.length === 0} className="py-1.5 bg-gray-800 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">PDF出力</button>
+                            <button onClick={explainAllClips} disabled={clips.length === 0 || isExplaining} className="py-1.5 bg-pink-600 text-white rounded-lg text-[10px] font-bold hover:opacity-90 disabled:opacity-30 transition-all">{isExplaining ? '解説中...' : 'AI解説'}</button>
                         </div>
+                        {explanationResult && (
+                            <div className="mt-2 p-2 bg-white rounded-lg border text-xs text-gray-700 max-h-40 overflow-y-auto whitespace-pre-wrap">
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="font-bold text-pink-600">AI解説結果</span>
+                                    <button onClick={() => { copyToClipboardFallback(explanationResult); }} className="text-[10px] text-blue-600 hover:underline">コピー</button>
+                                </div>
+                                {explanationResult}
+                            </div>
+                        )}
                     </div>
                     <div className="flex-1 p-3 space-y-4">
                         {clips.map((c, idx) => (
@@ -749,8 +800,13 @@ const PDFClipperApp = () => {
                                     {AI_MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                                 </select>
                             </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-400 mb-2 block uppercase tracking-wider">AI解説プロンプト</label>
+                                <textarea value={explanationPrompt} onChange={(e) => setExplanationPrompt(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl text-sm focus:ring-4 focus:ring-blue-50 outline-none transition-all resize-none" rows={3} placeholder="記事の解説方法を指定..." />
+                                <p className="text-[10px] text-gray-400 mt-2">※AI解説ボタンで使用されるプロンプトです。</p>
+                            </div>
                         </div>
-                        <button onClick={() => { localStorage.setItem('openRouterApiKey', openRouterApiKey); localStorage.setItem('selectedModel', selectedModel); setSettingsOpen(false) }} className="w-full py-3.5 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95">保存して閉じる</button>
+                        <button onClick={() => { localStorage.setItem('openRouterApiKey', openRouterApiKey); localStorage.setItem('selectedModel', selectedModel); localStorage.setItem('explanationPrompt', explanationPrompt); setSettingsOpen(false) }} className="w-full py-3.5 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95">保存して閉じる</button>
                     </div>
                 </div>
             )}
