@@ -58,9 +58,8 @@ const PDFClipperApp = () => {
     const [clips, setClips] = useState([]);
     const [fileDate, setFileDate] = useState(new Date());
     const [fileNamePrefix, setFileNamePrefix] = useState('【共有事項】');
-    const [outputFileName, setOutputFileName] = useState(`【共有事項】${formatDate(new Date())}`);
-    // 新聞記事カウンター
-    const [newsCounts, setNewsCounts] = useState({ nikkei: 0, agri: 0, mj: 0, commercial: 0 });
+    // 新聞記事カウンター (Matrix: YYYY-MM-DD -> { key: count })
+    const [matrixCounts, setMatrixCounts] = useState({});
     const [previewUrl, setPreviewUrl] = useState(null);
     const [copied, setCopied] = useState(false);
     const [aiModalOpen, setAiModalOpen] = useState(false);
@@ -443,22 +442,84 @@ const PDFClipperApp = () => {
         if (success) { setCopied(true); setTimeout(() => setCopied(false), 2000); }
     };
 
+    const formatDateKey = (date) => {
+        const d = new Date(date);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const updateMatrixCount = (date, key, delta) => {
+        const dKey = formatDateKey(date);
+        setMatrixCounts(prev => {
+            const currentCounts = prev[dKey] || { nikkei: 0, agri: 0, mj: 0, commercial: 0 };
+            const newCount = Math.max(0, (currentCounts[key] || 0) + delta);
+            return { ...prev, [dKey]: { ...currentCounts, [key]: newCount } };
+        });
+    };
+
     const copyAndOpenCybozu = () => {
-        const dateStr = formatShortDate(new Date());
+        const todayStr = formatShortDate(new Date());
+
+        // 過去（昨日以前）にカウントがあるかチェック
+        let hasPastCounts = false;
+        // 今日(0)〜4日前(4)をチェック、ただし今日は除外して過去判定
+        for (let i = 1; i < 5; i++) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const key = formatDateKey(d);
+            if (matrixCounts[key]) {
+                if (Object.values(matrixCounts[key]).some(v => v > 0)) {
+                    hasPastCounts = true;
+                    break;
+                }
+            }
+        }
+
+        const newspapers = [
+            { key: 'nikkei', label: '日本経済新聞' },
+            { key: 'agri', label: '日本農業新聞' },
+            { key: 'mj', label: '日経MJ' },
+            { key: 'commercial', label: '商業施設新聞' }
+        ];
+
+        let newsText = `${todayStr}分\n\n`;
+
+        newspapers.forEach(np => {
+            newsText += `■${np.label}\n`;
+
+            const dots = [];
+            // 4日前から今日までループ（古い順）
+            for (let i = 4; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                const dKey = formatDateKey(date);
+                const count = matrixCounts[dKey]?.[np.key] || 0;
+                if (count > 0) {
+                    for (let c = 0; c < count; c++) {
+                        if (hasPastCounts) {
+                            dots.push(`・（${formatShortDate(date)}）`);
+                        } else {
+                            dots.push(`・`);
+                        }
+                    }
+                }
+            }
+
+            if (dots.length > 0) {
+                newsText += dots.join('\n') + '\n';
+            } else {
+                // カウントが0でもヘッダーの下に・を表示するか？
+                // ユーザー要望「・の数を増やしてほしい」 -> 0ならなしか、デフォルト1個か。
+                // 現在の実装に合わせてデフォルトは出力しない（ヘッダーのみ）、もしくは空行。
+                // 既存: \n・\n でした。
+                // ここでは何も出さないと空間がなくなるので、空行を入れます。
+            }
+            newsText += '\n';
+        });
+
         const titlesList = clips.map(c => c.title ? `・${c.title}` : null).filter(Boolean).join('\n');
-        const copyText = `${dateStr}分\n\n■日本経済新聞 (${newsCounts.nikkei})\n・\n■日本農業新聞 (${newsCounts.agri})\n・\n■日経MJ (${newsCounts.mj})\n・\n■商業施設新聞 (${newsCounts.commercial})\n・\n\n${titlesList}`;
+        const copyText = newsText + titlesList;
         copyToClipboardFallback(copyText);
         window.open('https://op7oo.cybozu.com/o/ag.cgi?page=MyFolderMessageView&mid=455345&mdbid=10', '_blank');
-    };
-
-    const updateNewsCount = (key, delta) => {
-        setNewsCounts(prev => ({ ...prev, [key]: Math.max(0, prev[key] + delta) }));
-    };
-
-    const setRelativeDate = (daysAgo) => {
-        const d = new Date();
-        d.setDate(d.getDate() - daysAgo);
-        setFileDate(d);
     };
 
     const createPdfBlob = async () => {
@@ -559,38 +620,57 @@ const PDFClipperApp = () => {
             <div className="flex flex-1 overflow-hidden">
                 {/* Left Sidebar */}
                 <div className="w-64 bg-white border-r overflow-y-auto flex flex-col flex-shrink-0 z-10">
-                    {/* Date Shortcuts & News Counter */}
-                    <div className="p-3 bg-gray-50 border-b space-y-4">
-                        <div>
-                            <div className="text-xs font-bold text-gray-500 mb-2">日付選択</div>
-                            <div className="grid grid-cols-3 gap-1 mb-2">
-                                <button onClick={() => setRelativeDate(0)} className="px-2 py-1 text-xs bg-white border rounded hover:bg-blue-50 text-gray-600">今日</button>
-                                <button onClick={() => setRelativeDate(1)} className="px-2 py-1 text-xs bg-white border rounded hover:bg-blue-50 text-gray-600">昨日</button>
-                                <button onClick={() => setRelativeDate(2)} className="px-2 py-1 text-xs bg-white border rounded hover:bg-blue-50 text-gray-600">一昨日</button>
-                                <button onClick={() => setRelativeDate(3)} className="px-2 py-1 text-xs bg-white border rounded hover:bg-blue-50 text-gray-600">3日前</button>
-                                <button onClick={() => setRelativeDate(4)} className="px-2 py-1 text-xs bg-white border rounded hover:bg-blue-50 text-gray-600">4日前</button>
-                            </div>
+                    {/* Matrix Counter */}
+                    <div className="p-2 bg-gray-50 border-b">
+                        <div className="text-xs font-bold text-gray-500 mb-2 px-1">記事数カウンター</div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-center text-xs collapse border-hidden">
+                                <thead>
+                                    <tr>
+                                        <th className="p-1 text-left font-normal text-gray-400 w-16"></th>
+                                        {[0, 1, 2, 3, 4].map(daysAgo => {
+                                            const d = new Date();
+                                            d.setDate(d.getDate() - daysAgo);
+                                            const isToday = daysAgo === 0;
+                                            return (
+                                                <th key={daysAgo} className={`p-1 font-normal border-b min-w-[30px] ${isToday ? 'text-blue-600 font-bold' : 'text-gray-500'}`}>
+                                                    {formatShortDate(d)}
+                                                </th>
+                                            );
+                                        })}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {[
+                                        { key: 'nikkei', label: '日経' },
+                                        { key: 'agri', label: '農業' },
+                                        { key: 'mj', label: 'MJ' },
+                                        { key: 'commercial', label: '商業' }
+                                    ].map(np => (
+                                        <tr key={np.key} className="border-b last:border-0 bg-white">
+                                            <td className="p-1 text-left font-bold text-gray-600 whitespace-nowrap">{np.label}</td>
+                                            {[0, 1, 2, 3, 4].map(daysAgo => {
+                                                const d = new Date();
+                                                d.setDate(d.getDate() - daysAgo);
+                                                const dKey = formatDateKey(d);
+                                                const count = matrixCounts[dKey]?.[np.key] || 0;
+                                                return (
+                                                    <td
+                                                        key={daysAgo}
+                                                        className={`p-1 cursor-pointer select-none hover:bg-blue-50 transition border-l border-gray-100 ${count > 0 ? 'text-blue-600 font-bold' : 'text-gray-300'}`}
+                                                        onClick={() => updateMatrixCount(d, np.key, 1)}
+                                                        onContextMenu={(e) => { e.preventDefault(); updateMatrixCount(d, np.key, -1); }}
+                                                    >
+                                                        {count > 0 ? count : '-'}
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
-                        <div>
-                            <div className="text-xs font-bold text-gray-500 mb-2">記事数カウンター</div>
-                            <div className="space-y-2">
-                                {[
-                                    { key: 'nikkei', label: '日本経済新聞' },
-                                    { key: 'agri', label: '日本農業新聞' },
-                                    { key: 'mj', label: '日経MJ' },
-                                    { key: 'commercial', label: '商業施設新聞' }
-                                ].map(item => (
-                                    <div key={item.key} className="flex items-center justify-between text-xs bg-white p-1 rounded border">
-                                        <span className="font-medium pl-1 text-gray-700">{item.label}</span>
-                                        <div className="flex items-center gap-1">
-                                            <button onClick={() => updateNewsCount(item.key, -1)} className="w-5 h-5 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-bold">-</button>
-                                            <span className="w-4 text-center font-bold text-blue-600">{newsCounts[item.key]}</span>
-                                            <button onClick={() => updateNewsCount(item.key, 1)} className="w-5 h-5 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-bold">+</button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                        <div className="text-[10px] text-gray-400 mt-1 text-right px-1">左=増 / 右=減</div>
                     </div>
 
                     <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500">アップロード済みファイル</div>
