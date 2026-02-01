@@ -643,7 +643,11 @@ const PDFClipperApp = () => {
                             </div>
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={() => setSettingsOpen(true)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-all"><Settings size={18} /></button>
+                            <span className="text-[10px] font-medium text-gray-400 flex items-center">P.{currentPage}/{files[selectedFileIndex]?.pageCount || 1}</span>
+                            <button onClick={() => { setCropRect({ x: 0, y: 0, w: 0, h: 0 }); setMasks([]); }} className="px-2 py-1 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-all">クリア</button>
+                            <button onClick={saveClip} className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition-all">追加</button>
+                            <div className="w-px h-6 bg-gray-200 mx-1"></div>
+                            <button onClick={() => setSettingsOpen(true)} className="p-1.5 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-all"><Settings size={16} /></button>
                             <button onClick={handlePasteFromClipboard} className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-all"><Clipboard size={14} /><span>貼り付け</span></button>
                             <label className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-blue-700 shadow-sm transition-all">
                                 <Upload size={14} /><span>PDF追加</span>
@@ -674,13 +678,6 @@ const PDFClipperApp = () => {
                                 </svg>
                             </div>
                         )}
-                    </div>
-                    <div className="h-14 bg-white border-t flex items-center justify-between px-6">
-                        <div className="text-xs font-medium text-gray-400">P.{currentPage} / {files[selectedFileIndex]?.pageCount || 1}</div>
-                        <div className="flex gap-2">
-                            <button onClick={() => { setCropRect({ x: 0, y: 0, w: 0, h: 0 }); setMasks([]); setMode('view'); }} className="px-4 py-1.5 text-sm hover:underline text-gray-400">クリア</button>
-                            <button onClick={saveClip} className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-full text-sm font-bold shadow-lg hover:shadow-indigo-200 transition-all active:scale-95">クリップリストに追加</button>
-                        </div>
                     </div>
                 </div>
                 <div className={`${rightSidebarOpen ? 'w-72 border-l' : 'w-0'} bg-white transition-all overflow-y-auto flex flex-col`} onDragOver={handleDragOver} onDrop={handleDrop}>
