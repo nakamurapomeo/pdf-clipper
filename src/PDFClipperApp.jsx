@@ -63,7 +63,7 @@ const PDFClipperApp = () => {
     const [selectedFileIndex, setSelectedFileIndex] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
     const [rotation, setRotation] = useState(0);
-    const [mode, setMode] = useState('view');
+    const [mode, setMode] = useState('crop');
     const [cropRect, setCropRect] = useState({ x: 0, y: 0, w: 0, h: 0 });
     const [masks, setMasks] = useState([]);
     const [zoomLevel, setZoomLevel] = useState(1.0);
@@ -79,6 +79,7 @@ const PDFClipperApp = () => {
     const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
     const [interactionState, setInteractionState] = useState({ type: 'none', target: null, index: null });
     const [startPos, setStartPos] = useState({ x: 0, y: 0 });
+    const [pageThumbnails, setPageThumbnails] = useState([]);
 
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -98,8 +99,31 @@ const PDFClipperApp = () => {
             newFiles.push({ name: file.name, data: arrayBuffer, pdf, pageCount: pdf.numPages });
         }
         if (newFiles.length === 0) return;
+        const prevFilesLength = files.length;
         setFiles(prev => [...prev, ...newFiles]);
-        if (selectedFileIndex === null && newFiles.length > 0) setSelectedFileIndex(files.length);
+        if (selectedFileIndex === null && newFiles.length > 0) setSelectedFileIndex(prevFilesLength);
+
+        // サムネイル生成
+        const thumbnails = [];
+        let fileOffset = prevFilesLength;
+        for (const file of newFiles) {
+            for (let pageNum = 1; pageNum <= file.pageCount; pageNum++) {
+                const page = await file.pdf.getPage(pageNum);
+                const viewport = page.getViewport({ scale: 0.2 });
+                const canvas = document.createElement('canvas');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+                thumbnails.push({
+                    fileIndex: fileOffset,
+                    pageNum,
+                    dataUrl: canvas.toDataURL('image/jpeg', 0.6),
+                    fileName: file.name
+                });
+            }
+            fileOffset++;
+        }
+        setPageThumbnails(prev => [...prev, ...thumbnails]);
     };
 
     // ドラッグ＆ドロップハンドラ
@@ -206,6 +230,36 @@ const PDFClipperApp = () => {
 
     const handleMouseUp = () => setInteractionState({ type: 'none', target: null, index: null });
 
+    // 記事数カウンターに基づく次の日付・新聞を取得
+    const getNextDateNewspaper = () => {
+        const dateOrder = [4, 3, 2, 1, 0]; // 古い日付から
+        const npOrder = ['agri', 'nikkei', 'mj', 'commercial'];
+
+        // 現在のクリップ数を日付・新聞別にカウント
+        const clipCounts = {};
+        for (const clip of clips) {
+            const key = `${clip.date}_${clip.newspaper}`;
+            clipCounts[key] = (clipCounts[key] || 0) + 1;
+        }
+
+        // カウンター順に当てはめていく
+        for (const dayOffset of dateOrder) {
+            const d = new Date(Date.now() - dayOffset * 86400000);
+            const dateKey = formatDateKey(d);
+            const counts = matrixCounts[dateKey] || {};
+
+            for (const np of npOrder) {
+                const targetCount = counts[np] || 0;
+                const currentCount = clipCounts[`${dateKey}_${np}`] || 0;
+                if (currentCount < targetCount) {
+                    return { date: dateKey, newspaper: np };
+                }
+            }
+        }
+        // デフォルト: 今日の日本農業新聞
+        return { date: formatDateKey(new Date()), newspaper: 'agri' };
+    };
+
     const saveClip = async () => {
         if (selectedFileIndex === null || cropRect.w === 0) return;
         const canvas = canvasRef.current;
@@ -215,12 +269,11 @@ const PDFClipperApp = () => {
         offscreen.width = w; offscreen.height = h;
         ctx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
         const dataUrl = offscreen.toDataURL('image/jpeg');
-        // デフォルトで今日の日付と最初の新聞種別を設定
-        const todayKey = formatDateKey(new Date());
-        const newClip = { id: Date.now(), dataUrl, title: '', scalePercent: 100, aspectRatio: w / h, date: todayKey, newspaper: 'agri' };
+        // カウンターに基づいて自動割り当て
+        const { date, newspaper } = getNextDateNewspaper();
+        const newClip = { id: Date.now(), dataUrl, title: '', scalePercent: 100, aspectRatio: w / h, date, newspaper };
         setClips([...clips, newClip]);
         setCropRect({ x: 0, y: 0, w: 0, h: 0 });
-        setMode('view');
     };
 
     const analyzeTitleWithAI = async (id) => {
@@ -238,7 +291,7 @@ const PDFClipperApp = () => {
                     model: selectedModel,
                     messages: [{
                         role: 'user', content: [
-                            { type: 'text', text: "この新聞記事の見出し（タイトル）のみを正確に抽出して返してください。説明は不要です。" },
+                            { type: 'text', text: "この新聞記事の見出し（タイトル）のみを正確に抽出して返してください。文字が読み取れない場合は、画像から推測して答えてください。説明は不要です。" },
                             { type: 'image_url', image_url: { url: clip.dataUrl } }
                         ]
                     }]
@@ -438,11 +491,17 @@ const PDFClipperApp = () => {
                             ))}</tbody>
                         </table>
                     </div>
-                    <div className="flex-1 p-2 space-y-1">
-                        <div className="text-[10px] font-bold text-gray-400 px-1 mb-2">アップロード済み</div>
-                        {files.map((f, i) => (
-                            <div key={i} onClick={() => setSelectedFileIndex(i)} className={`p-2 rounded-md text-sm cursor-pointer truncate transition-all ${selectedFileIndex === i ? 'bg-blue-50 text-blue-600 font-bold' : 'hover:bg-gray-50'}`}>{f.name}</div>
-                        ))}
+                    <div className="flex-1 p-2 space-y-1 overflow-y-auto">
+                        <div className="text-[10px] font-bold text-gray-400 px-1 mb-2">ページプレビュー ({pageThumbnails.length})</div>
+                        <div className="grid grid-cols-2 gap-2">
+                            {pageThumbnails.map((thumb, i) => (
+                                <div key={i} onClick={() => { setSelectedFileIndex(thumb.fileIndex); setCurrentPage(thumb.pageNum); }} className={`cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${selectedFileIndex === thumb.fileIndex && currentPage === thumb.pageNum ? 'border-blue-500 shadow-lg' : 'border-transparent hover:border-gray-300'}`}>
+                                    <img src={thumb.dataUrl} className="w-full h-auto" alt={`${thumb.fileName} P${thumb.pageNum}`} />
+                                    <div className="text-[8px] text-center text-gray-500 py-0.5 bg-gray-50 truncate">P{thumb.pageNum}</div>
+                                </div>
+                            ))}
+                        </div>
+                        {pageThumbnails.length === 0 && <div className="text-center py-10 text-gray-300 text-xs italic">PDFをアップロードしてください</div>}
                     </div>
                 </div>
                 <div className="flex-1 flex flex-col bg-gray-200 relative min-w-0">
