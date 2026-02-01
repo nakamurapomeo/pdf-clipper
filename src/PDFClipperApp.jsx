@@ -59,6 +59,8 @@ const PDFClipperApp = () => {
     const [fileDate, setFileDate] = useState(new Date());
     const [fileNamePrefix, setFileNamePrefix] = useState('【共有事項】');
     const [outputFileName, setOutputFileName] = useState(`【共有事項】${formatDate(new Date())}`);
+    // 新聞記事カウンター
+    const [newsCounts, setNewsCounts] = useState({ nikkei: 0, agri: 0, mj: 0, commercial: 0 });
     const [previewUrl, setPreviewUrl] = useState(null);
     const [copied, setCopied] = useState(false);
     const [aiModalOpen, setAiModalOpen] = useState(false);
@@ -444,9 +446,19 @@ const PDFClipperApp = () => {
     const copyAndOpenCybozu = () => {
         const dateStr = formatShortDate(new Date());
         const titlesList = clips.map(c => c.title ? `・${c.title}` : null).filter(Boolean).join('\n');
-        const copyText = `${dateStr}分\n\n■日本経済新聞\n・\n■日本農業新聞\n・\n■日経MJ\n・\n■商業施設新聞\n・\n\n${titlesList}`;
+        const copyText = `${dateStr}分\n\n■日本経済新聞 (${newsCounts.nikkei})\n・\n■日本農業新聞 (${newsCounts.agri})\n・\n■日経MJ (${newsCounts.mj})\n・\n■商業施設新聞 (${newsCounts.commercial})\n・\n\n${titlesList}`;
         copyToClipboardFallback(copyText);
         window.open('https://op7oo.cybozu.com/o/ag.cgi?page=MyFolderMessageView&mid=455345&mdbid=10', '_blank');
+    };
+
+    const updateNewsCount = (key, delta) => {
+        setNewsCounts(prev => ({ ...prev, [key]: Math.max(0, prev[key] + delta) }));
+    };
+
+    const setRelativeDate = (daysAgo) => {
+        const d = new Date();
+        d.setDate(d.getDate() - daysAgo);
+        setFileDate(d);
     };
 
     const createPdfBlob = async () => {
@@ -547,6 +559,40 @@ const PDFClipperApp = () => {
             <div className="flex flex-1 overflow-hidden">
                 {/* Left Sidebar */}
                 <div className="w-64 bg-white border-r overflow-y-auto flex flex-col flex-shrink-0 z-10">
+                    {/* Date Shortcuts & News Counter */}
+                    <div className="p-3 bg-gray-50 border-b space-y-4">
+                        <div>
+                            <div className="text-xs font-bold text-gray-500 mb-2">日付選択</div>
+                            <div className="grid grid-cols-3 gap-1 mb-2">
+                                <button onClick={() => setRelativeDate(0)} className="px-2 py-1 text-xs bg-white border rounded hover:bg-blue-50 text-gray-600">今日</button>
+                                <button onClick={() => setRelativeDate(1)} className="px-2 py-1 text-xs bg-white border rounded hover:bg-blue-50 text-gray-600">昨日</button>
+                                <button onClick={() => setRelativeDate(2)} className="px-2 py-1 text-xs bg-white border rounded hover:bg-blue-50 text-gray-600">一昨日</button>
+                                <button onClick={() => setRelativeDate(3)} className="px-2 py-1 text-xs bg-white border rounded hover:bg-blue-50 text-gray-600">3日前</button>
+                                <button onClick={() => setRelativeDate(4)} className="px-2 py-1 text-xs bg-white border rounded hover:bg-blue-50 text-gray-600">4日前</button>
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs font-bold text-gray-500 mb-2">記事数カウンター</div>
+                            <div className="space-y-2">
+                                {[
+                                    { key: 'nikkei', label: '日本経済新聞' },
+                                    { key: 'agri', label: '日本農業新聞' },
+                                    { key: 'mj', label: '日経MJ' },
+                                    { key: 'commercial', label: '商業施設新聞' }
+                                ].map(item => (
+                                    <div key={item.key} className="flex items-center justify-between text-xs bg-white p-1 rounded border">
+                                        <span className="font-medium pl-1 text-gray-700">{item.label}</span>
+                                        <div className="flex items-center gap-1">
+                                            <button onClick={() => updateNewsCount(item.key, -1)} className="w-5 h-5 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-bold">-</button>
+                                            <span className="w-4 text-center font-bold text-blue-600">{newsCounts[item.key]}</span>
+                                            <button onClick={() => updateNewsCount(item.key, 1)} className="w-5 h-5 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded text-gray-600 font-bold">+</button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-500">アップロード済みファイル</div>
                     <div className="flex-1 p-2 space-y-2">
                         {files.map((file, idx) => (
