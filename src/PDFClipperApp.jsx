@@ -180,6 +180,15 @@ const PDFClipperApp = () => {
         return () => window.removeEventListener('paste', handlePaste);
     }, []);
 
+    // Ctrl+ホイールでPDFビューアのみズーム
+    const handleWheel = useCallback((e) => {
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -0.1 : 0.1;
+            setZoomLevel(z => Math.max(0.5, Math.min(3, z + delta)));
+        }
+    }, []);
+
     const renderPage = useCallback(async () => {
         if (selectedFileIndex === null || !files[selectedFileIndex] || !canvasRef.current) return;
         const page = await files[selectedFileIndex].pdf.getPage(currentPage);
@@ -187,12 +196,12 @@ const PDFClipperApp = () => {
         const containerH = containerRef.current?.clientHeight || 600;
         const unscaled = page.getViewport({ scale: 1 });
         const scale = Math.min(containerW / unscaled.width, containerH / unscaled.height) * 0.95 * zoomLevel;
-        const viewport = page.getViewport({ scale, rotation });
+        const viewport = page.getViewport({ scale });
         const canvas = canvasRef.current;
         canvas.height = viewport.height;
         canvas.width = viewport.width;
         await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-    }, [selectedFileIndex, files, currentPage, rotation, zoomLevel]);
+    }, [selectedFileIndex, files, currentPage, zoomLevel]);
 
     useEffect(() => { renderPage(); }, [renderPage]);
 
@@ -274,6 +283,36 @@ const PDFClipperApp = () => {
         const newClip = { id: Date.now(), dataUrl, title: '', scalePercent: 100, aspectRatio: w / h, date, newspaper };
         setClips([...clips, newClip]);
         setCropRect({ x: 0, y: 0, w: 0, h: 0 });
+    };
+
+    // 再割り当て: カウンターに基づいてすべてのクリップの日付・新聞を再設定
+    const reassignAllClips = () => {
+        const dateOrder = [4, 3, 2, 1, 0];
+        const npOrder = ['agri', 'nikkei', 'mj', 'commercial'];
+
+        // カウンターからすべての割り当てスロットを順番に生成
+        const slots = [];
+        for (const dayOffset of dateOrder) {
+            const d = new Date(Date.now() - dayOffset * 86400000);
+            const dateKey = formatDateKey(d);
+            const counts = matrixCounts[dateKey] || {};
+            for (const np of npOrder) {
+                const count = counts[np] || 0;
+                for (let i = 0; i < count; i++) {
+                    slots.push({ date: dateKey, newspaper: np });
+                }
+            }
+        }
+
+        // クリップに順番に割り当て
+        const newClips = clips.map((clip, idx) => {
+            if (idx < slots.length) {
+                return { ...clip, date: slots[idx].date, newspaper: slots[idx].newspaper };
+            }
+            return clip;
+        });
+        setClips(newClips);
+        alert('日付・新聞種別を再割り当てしました。');
     };
 
     const analyzeTitleWithAI = async (id) => {
@@ -522,9 +561,9 @@ const PDFClipperApp = () => {
                             <button onClick={() => setZoomLevel(z => Math.min(3, z + 0.1))} className="hover:text-blue-600 transition-colors"><Plus size={16} /></button>
                         </div>
                     </div>
-                    <div ref={containerRef} className="flex-1 overflow-auto p-8 flex justify-center no-scrollbar" onDragOver={handleDragOver} onDrop={handleDrop}>
+                    <div ref={containerRef} className="flex-1 overflow-auto p-8 flex justify-center no-scrollbar" onDragOver={handleDragOver} onDrop={handleDrop} onWheel={handleWheel}>
                         {selectedFileIndex !== null && (
-                            <div className="relative bg-white shadow-2xl mx-auto self-start ring-1 ring-black/5">
+                            <div className="relative bg-white shadow-2xl mx-auto self-start ring-1 ring-black/5" style={{ transform: `rotate(${rotation}deg)` }}>
                                 <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} className={mode !== 'view' ? 'cursor-crosshair' : 'cursor-default'} />
                                 <svg className="absolute inset-0 w-full h-full pointer-events-none">
                                     {cropRect.w > 0 && <rect x={`${cropRect.x * 100}%`} y={`${cropRect.y * 100}%`} width={`${cropRect.w * 100}%`} height={`${cropRect.h * 100}%`} fill="rgba(34,197,94,0.1)" stroke="#22c55e" strokeWidth="2" strokeDasharray="4" />}
@@ -576,6 +615,7 @@ const PDFClipperApp = () => {
                     </div>
                     <div className="p-4 bg-gray-50 border-t space-y-2">
                         <button onClick={analyzeAllTitles} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">すべてAI解析</button>
+                        <button onClick={reassignAllClips} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-yellow-500 to-amber-500 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">日付・新聞を再割り当て</button>
                         <button onClick={copyShareText} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-green-600 to-teal-600 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">共有テキストをコピー</button>
                         <button onClick={downloadDailyPDFs} disabled={clips.length === 0} className="w-full py-2 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-xl text-xs font-bold shadow-lg hover:opacity-90 disabled:opacity-30 transition-all active:scale-95">日別PDFを出力</button>
                         <div className="border-t my-2"></div>
